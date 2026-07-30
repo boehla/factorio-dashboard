@@ -1,0 +1,14 @@
+{
+  "name": "fdash-exporter",
+  "version": "0.1.0",
+  "title": "Factorio Dashboard Exporter",
+  "author": "boehla",
+  "contact": "https://github.com/boehla/factorio-dashboard",
+  "homepage": "https://github.com/boehla/factorio-dashboard",
+  "factorio_version": "2.0",
+  "description": "Exports live factory statistics (power, machines, production, trains, logistics, resources, platforms, research) for an external dashboard. All work is spread across ticks with a hard per-tick budget, so it does not stall the game like /silent-command polling does. Data is written to script-output/fdash/ and is also available via a remote interface for RCON.",
+  "dependencies": [
+    "base >= 2.0.0",
+    "? space-age"
+  ]
+}

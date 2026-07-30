@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="..\Fdash.Core\Fdash.Core.csproj" />
+    <ProjectReference Include="..\Fdash.Collector\Fdash.Collector.csproj" />
+    <ProjectReference Include="..\Fdash.Storage\Fdash.Storage.csproj" />
+    <ProjectReference Include="..\Fdash.Rcon\Fdash.Rcon.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Lokale Overrides (RCON-Passwort) mit ins Ausgabeverzeichnis nehmen,
+         falls vorhanden. Die Datei ist per .gitignore ausgeschlossen. -->
+    <None Update="appsettings.Local.json" CopyToOutputDirectory="PreserveNewest" Condition="Exists('appsettings.Local.json')" />
+  </ItemGroup>
+</Project>

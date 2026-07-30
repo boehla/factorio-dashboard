@@ -1,0 +1,20 @@
+---------------------------------------------------------------------------------------------------
+Version: 0.1.0
+Date: 2026-07-30
+  Features:
+    - Initial release.
+    - Exports power, machines, production, trains, logistics, circuits, drills, ore patches,
+      research candidates and Space Age platforms for an external dashboard.
+    - Snapshot output to script-output/fdash/ with rotating files and an index for tear-free reads.
+    - Remote interface "fdash" (snapshot, get, keys, status, set_research, export_prototypes)
+      for reading over RCON instead of files.
+    - One-shot prototype export to script-output/fdash/prototypes.json.
+    - Console command /fdash-status.
+  Optimizations:
+    - All collectors run under a hard per-tick entity budget and are spread across ticks, so the
+      cost per tick does not grow with factory size.
+    - Entity lists are maintained from build events instead of rescanning surfaces every poll.
+    - Ore is scanned chunk by chunk in a rolling pass instead of one full surface scan.
+    - The amount of ore inside each drill's mining radius is cached and refreshed on a slow timer.
+    - Prototype-derived lookups (recipe main products, recipe ingredients, ingredient set,
+      resource properties) are computed once per session instead of once per poll.

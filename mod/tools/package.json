@@ -1,0 +1,12 @@
+{
+  "name": "fdash-mod-tools",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Statische Pruefungen fuer den Lua-Code des Mods.",
+  "scripts": {
+    "check": "node check-lua.js ../fdash-exporter"
+  },
+  "dependencies": {
+    "luaparse": "^0.3.1"
+  }
+}

@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Fdash.Core\Fdash.Core.csproj" />
+  </ItemGroup>
+</Project>

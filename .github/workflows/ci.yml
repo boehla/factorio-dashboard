@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: Backend (build + Selbsttests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build
+        run: dotnet build FactorioDashboard.sln -c Release
+
+      # Beide Diagnose-/Testprojekte liegen ausserhalb der Solution und wuerden
+      # sonst unbemerkt verrotten.
+      - name: Build tools
+        run: |
+          dotnet build tests/Fdash.Tests -c Release
+          dotnet build tests/Fdash.LiveCheck -c Release
+
+      # Liefert die Anzahl fehlgeschlagener Checks als Exit-Code.
+      - name: Selbsttests
+        run: dotnet run --project tests/Fdash.Tests -c Release --no-build
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+        working-directory: web
+
+      - run: npm run build
+        working-directory: web
+
+  mod:
+    name: Mod (Lua-Pruefungen + Paket)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - run: npm install --no-audit --no-fund
+        working-directory: mod/tools
+
+      # Syntax, unerwartete Globals, Cross-Modul-Aufrufe.
+      - name: Lua-Pruefungen
+        run: node check-lua.js ../fdash-exporter
+        working-directory: mod/tools
+
+      # info.json und changelog.txt muessen zusammenpassen, sonst lehnt das
+      # Mod-Portal den Upload ab.
+      - name: info.json und changelog pruefen
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./mod/fdash-exporter/info.json').version")
+          echo "info.json version: $version"
+
+          if ! grep -qx "Version: $version" mod/fdash-exporter/changelog.txt; then
+            echo "::error::changelog.txt has no 'Version: $version' entry"
+            exit 1
+          fi
+
+          # Die Trennlinie im Factorio-Changelog muss exakt 99 Bindestriche haben.
+          if ! grep -qx -- "-\{99\}" mod/fdash-exporter/changelog.txt; then
+            echo "::error::changelog.txt separator line is not exactly 99 dashes"
+            exit 1
+          fi
+
+          for f in control.lua info.json settings.json thumbnail.png changelog.txt LICENSE; do
+            test -f "mod/fdash-exporter/$f" || { echo "::error::missing mod/fdash-exporter/$f"; exit 1; }
+          done
+
+          if grep -rq "SET-ME" mod/fdash-exporter/; then
+            echo "::warning::mod still contains SET-ME placeholders — fill them before uploading to the portal"
+          fi

@@ -1,0 +1,41 @@
+# ---------------------------------------------------------------- Geheimnisse
+# RCON-Passwort und alles andere Maschinenspezifische. NIE committen.
+appsettings.Local.json
+**/appsettings.Local.json
+*.env
+.env
+
+# ------------------------------------------------------------------- .NET
+bin/
+obj/
+publish/
+*.user
+*.suo
+.vs/
+
+# ----------------------------------------------------------------- Node/Web
+node_modules/
+web/dist/
+*.tsbuildinfo
+
+# Vite-Build-Ergebnis; komplett, nicht nur assets/ — index.html gehoert dazu und
+# wuerde sonst allein im Repo liegen und auf fehlende Assets verweisen.
+# Ein frischer Klon braucht `cd web && npm run build` (steht im README).
+src/Fdash.Api/wwwroot/
+
+# --------------------------------------------------------------- Zeitreihe
+# Die SQLite-Datenbank waechst auf hunderte MB und gehoert nicht ins Repo.
+*.db
+*.db-shm
+*.db-wal
+*_Conflict.db*
+
+# ------------------------------------------------------------------- Mod
+# Build-Ergebnis von mod/build-mod.ps1
+mod/dist/
+
+# ------------------------------------------------------- Synology Drive u.a.
+*_Conflict.*
+@eaDir/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,20 @@
+# Zeilenenden im Repo normalisieren, im Arbeitsverzeichnis plattformueblich.
+# Ohne das erzeugt der Wechsel zwischen Windows-Editor und Linux-CI Diffs, in
+# denen jede Zeile geaendert aussieht.
+* text=auto
+
+*.cs      text diff=csharp
+*.lua     text
+*.json    text
+*.md      text
+*.yml     text
+*.cfg     text
+
+# Windows-Skripte brauchen CRLF, sonst stolpert cmd.exe darueber.
+*.bat     text eol=crlf
+*.ps1     text eol=crlf
+
+*.png     binary
+*.jpg     binary
+*.zip     binary
+*.db      binary
