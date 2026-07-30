@@ -1,104 +1,103 @@
 # Factorio Dashboard
 
-Zweitbildschirm-Dashboard für Factorio (2.0 / Space Age): **Factorio-Mod** als Datenquelle +
-ASP.NET-Core-API mit SignalR + React-Frontend.
+Second-screen dashboard for Factorio (2.0 / Space Age): a **Factorio mod** as the data source,
+an ASP.NET Core API with SignalR, and a React frontend.
 
-Das Repo enthält beide Hälften:
+The repository holds both halves:
 
 ```
-mod/fdash-exporter/   Der Factorio-Mod (Lua). Sammelt budgetiert und schreibt Snapshots.
-src/                  Der Webserver (C#). Liest Snapshots, speichert Zeitreihen, serviert das UI.
-web/                  Das Frontend (React + TS + Vite + Tailwind + uPlot).
+mod/fdash-exporter/   The Factorio mod (Lua). Collects under a budget, writes snapshots.
+src/                  The web server (C#). Reads snapshots, stores time series, serves the UI.
+web/                  The frontend (React + TS + Vite + Tailwind + uPlot).
 ```
 
-## Warum ein Mod statt RCON
+## Why a mod instead of RCON
 
-Die erste Fassung holte alles über RCON `/silent-command`. Das funktioniert — aber jeder Poll
-führt die komplette Auswertung **in einem einzigen Game-Tick** aus. Ein
-`find_entities_filtered{type="assembling-machine"}` läuft über jede Entity der Oberfläche; auf
-einer großen modded Basis sind das sechsstellige Zahlen, mehrmals pro Minute. Das Ergebnis war
-spürbares Ruckeln.
+The first version pulled everything over RCON `/silent-command`. That works — but every poll
+runs the entire query **inside a single game tick**. A `find_entities_filtered{type=
+"assembling-machine"}` walks every entity on the surface; on a large modded base that is a
+six-figure number, several times a minute. The result was noticeable stutter.
 
-Der Mod dreht das um: Er hält seine eigene Sicht auf die Fabrik, aktualisiert sie pro Tick nur
-ein Stück weit unter einem **harten Budget**, und gibt einen fertigen Snapshot heraus. Das
-Abholen kostet dann nichts mehr, weil nichts mehr zu rechnen ist.
+The mod inverts the arrangement. It keeps its own view of the factory, advances it only a
+little each tick under a **hard budget**, and hands out a finished snapshot. Fetching then
+costs nothing, because there is nothing left to compute.
 
-| | vorher (RCON-Snippets) | jetzt (Mod) |
+| | before (RCON snippets) | now (mod) |
 | --- | --- | --- |
-| Wo wird gerechnet | im Tick, beim Poll | über viele Ticks verteilt |
-| Kosten pro Tick | wächst mit der Fabrik | fest (`fdash-entity-budget`) |
-| Entity-Listen | jedes Mal neu gesucht | einmal gescannt, per Events gepflegt |
-| Erz-Scan | Voll-Scan alle 60 s | rollierend, ein paar Chunks pro Tick |
-| Erz unter Bohrern | ein Area-Scan **pro Bohrer**, alle 60 s | pro Bohrer gecacht, alle 10 min erneuert |
-| Rezept-Ableitungen | bei jedem Poll über alle Rezepte | einmal pro Session |
-| RCON nötig | ja | nur für Auto-Research |
+| Where the work happens | in the tick, on every poll | spread across many ticks |
+| Cost per tick | grows with the factory | fixed (`fdash-entity-budget`) |
+| Entity lists | searched again every time | scanned once, maintained from events |
+| Ore scan | full scan every 60 s | rolling, a few chunks per tick |
+| Ore under drills | one area scan **per drill**, every 60 s | cached per drill, refreshed every 10 min |
+| Recipe lookups | over all recipes on every poll | once per session |
+| RCON required | yes | only for auto-research |
 
-Details und Tuning: [`mod/fdash-exporter/README.md`](mod/fdash-exporter/README.md).
+Details and tuning: [`mod/fdash-exporter/README.md`](mod/fdash-exporter/README.md).
 
-## Einrichten
+## Setup
 
-### 1. Mod bauen und installieren
+### 1. Build and install the mod
 
 ```bash
 powershell -ExecutionPolicy Bypass -File .\mod\build-mod.ps1 -Install
 ```
 
-Das packt `mod/fdash-exporter` zu `mod/dist/fdash-exporter_<version>.zip` und legt sie in
-`%APPDATA%\Factorio\mods`. Für einen dedizierten Server die ZIP dorthin kopieren, wo dessen
-`mods`-Ordner liegt. Danach Factorio bzw. den Server neu starten.
+This packs `mod/fdash-exporter` into `mod/dist/fdash-exporter_<version>.zip` and drops it into
+`%APPDATA%\Factorio\mods`. For a dedicated server, copy the zip to wherever that server's
+`mods` directory lives. Then restart Factorio or the server.
 
-Beim ersten Start scannt der Mod die Karte einmal durch (gestückelt). Auf großen Karten dauert
-das ein bis zwei Minuten; solange meldet `meta.exporter.scanning` den Fortschritt.
+On first start the mod scans the map once, in chunks. On large maps that takes a minute or
+two; `meta.exporter.scanning` reports the progress while it runs.
 
-### 2. Webserver konfigurieren
+### 2. Configure the web server
 
 `src/Fdash.Api/appsettings.json`:
 
-- `Collector:Transport` — `Auto` (Default), `File` oder `Rcon`.
-- `Collector:ScriptOutputPath` — Factorios `script-output`-Verzeichnis. Der Mod legt darunter
-  `fdash/` an. `%APPDATA%` wird aufgelöst.
-- `Collector:PollIntervalMs` — wie oft nach einem neuen Snapshot gesehen wird (Default 1000).
+- `Collector:Transport` — `Auto` (default), `File` or `Rcon`.
+- `Collector:ScriptOutputPath` — Factorio's `script-output` directory. The mod creates
+  `fdash/` underneath it. `%APPDATA%` is expanded.
+- `Collector:PollIntervalMs` — how often to check for a new snapshot (default 1000).
 
-**Transportwege**
+**Transports**
 
-- **Datei** (bevorzugt): Dashboard und Factorio sehen dasselbe Dateisystem. Kein
-  RCON-Passwort, kein Tick-Slot pro Abruf.
-- **RCON**: Dashboard läuft woanders. Braucht `Collector:RconPassword`. Der Mod rechnet auch
-  hier nichts im Tick — die Kommandos geben nur fertige Strings zurück.
+- **File** (preferred): dashboard and Factorio share a filesystem. No RCON password, no tick
+  slot per fetch.
+- **RCON**: dashboard runs elsewhere. Needs `Collector:RconPassword`. The mod does not compute
+  anything in the tick here either — the commands just return finished strings.
 
-`Auto` nimmt die Datei, sobald der Mod dorthin schreibt, sonst RCON.
+`Auto` uses the file transport as soon as the mod writes there, and RCON otherwise.
 
-**Das RCON-Passwort gehört nicht ins Repo.** Entweder
-`src/Fdash.Api/appsettings.Local.json` (per `.gitignore` ausgeschlossen, Vorlage liegt als
-`appsettings.Local.example.json` daneben) oder als Umgebungsvariable:
+**The RCON password does not belong in the repository.** Use either
+`src/Fdash.Api/appsettings.Local.json` (excluded via `.gitignore`, a template sits next to it
+as `appsettings.Local.example.json`) or an environment variable:
 
 ```bash
-Collector__RconPassword=geheim
+Collector__RconPassword=secret
 ```
 
-RCON ist nur für **Auto-Research** zwingend — der einzige schreibende Pfad. Ohne RCON zeigt
-das Dashboard weiterhin einen Forschungsvorschlag an, setzt ihn aber nicht.
+RCON is only mandatory for **auto-research** — the single writing path. Without it the
+dashboard still shows a research suggestion, it just does not apply it.
 
 ### 3. Icons (optional)
 
-Die Zuordnung Prototyp → PNG kommt aus `data-raw-dump.json`, weil die Runtime-API keine
-Icon-Pfade herausgibt. Einmalig — und nach jeder Mod-Änderung — erzeugen:
+The prototype-to-PNG mapping comes from `data-raw-dump.json`, because the runtime API does not
+expose icon paths. Generate it once — and after every mod change:
 
 ```
 "C:\Program Files\Factorio\bin\x64\factorio.exe" --dump-data
 ```
 
-Landet in `%APPDATA%\Factorio\script-output\data-raw-dump.json`. Ohne den Dump wird nur über
-den Dateinamen geraten; Items mit abweichendem Icon-Namen bleiben ohne Bild.
+It lands in `%APPDATA%\Factorio\script-output\data-raw-dump.json`. Without it the dashboard
+only guesses from the file name, so items whose icon file is named differently stay blank.
 
-## Bauen und starten
+## Build and run
 
 ```bash
 dotnet build FactorioDashboard.sln
-dotnet run --project tests/Fdash.Tests      # Selbsttests
+dotnet run --project tests/Fdash.Tests      # self-tests
 ```
 
-Frontend (Build landet in `src/Fdash.Api/wwwroot` → ein Prozess, ein Port):
+Frontend (output goes to `src/Fdash.Api/wwwroot` → one process, one port):
 
 ```bash
 cd web
@@ -106,66 +105,72 @@ npm install
 npm run build
 ```
 
-Starten:
+Run it:
 
 ```bash
 dotnet run --project src/Fdash.Api          # http://localhost:5000
 ```
 
-Unter Windows tut es auch `start.bat` (nimmt die veröffentlichte EXE, falls vorhanden).
-Dev-Frontend mit Hot-Reload separat: `cd web && npm run dev` (Port 5173, proxyt `/api` und
-`/hub` auf 5000).
+On Windows `start.bat` also works (it prefers the published exe if there is one). For a
+hot-reloading dev frontend, run `cd web && npm run dev` separately (port 5173, proxies `/api`
+and `/hub` to 5000).
 
-Self-contained veröffentlichen:
+Publish self-contained:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\publish.ps1
 .\publish\Fdash.Api.exe
 ```
 
-## Prüfen, ob Daten ankommen
+## Checking that data arrives
 
 ```
 http://localhost:5000/api/health
 ```
 
-zeigt Transportweg, ob geschrieben werden kann, ob die Prototypen geladen sind und den
-Rohstatus des Mods.
+reports the transport in use, whether writing is possible, whether the prototypes are loaded,
+and the mod's raw status.
 
-Ohne laufendes Backend geht auch das Diagnose-Tool — es listet jeden Job mit Alter und
-Payload-Größe:
+There is also a diagnostic tool that needs no running backend — it lists every job with its
+age and payload size:
 
 ```bash
 FDASH_SCRIPT_OUTPUT="%APPDATA%\Factorio\script-output" dotnet run --project tests/Fdash.LiveCheck
 ```
 
-Oder über RCON: `FDASH_HOST`, `FDASH_PORT`, `FDASH_PASS`.
+Or over RCON, via `FDASH_HOST`, `FDASH_PORT`, `FDASH_PASS`.
 
-Im Spiel: `/fdash-status`.
+In game: `/fdash-status`.
 
-## Architektur
+## Architecture
 
 ```
 Factorio + fdash-exporter
-   │  budgetierte Sweeps, Double-Buffer, vorserialisiertes JSON
+   │  budgeted sweeps, double buffering, pre-serialised JSON
    ▼
-script-output/fdash/  ──oder──  RCON remote.call("fdash","snapshot")
+script-output/fdash/  ──or──  RCON remote.call("fdash","snapshot")
    │
    ▼
-GameLink (Transportwahl)  →  CollectorService
-                                 ├─ SnapshotBus  → SignalR → React
-                                 ├─ SqliteTimeSeriesStore (Roll-up-Tiers)
-                                 ├─ StallDetector
-                                 └─ AutoResearchService  ──RCON──▶  set_research
+GameLink (transport choice)  →  CollectorService
+                                   ├─ SnapshotBus  → SignalR → React
+                                   ├─ SqliteTimeSeriesStore (roll-up tiers)
+                                   ├─ StallDetector
+                                   └─ AutoResearchService  ──RCON──▶  set_research
 ```
 
-Die Job-Intervalle stehen im Mod, nicht mehr im Server — der Server liest nur ab, was da ist,
-und erkennt an einem Zeitstempel pro Job, was sich geändert hat.
+Job intervals live in the mod, not in the server any more. The server only reads what is
+there and uses a per-job timestamp to tell what changed.
 
-## Veröffentlichen
+## Publishing
 
-Vor dem ersten Upload auf das Mod-Portal: [`RELEASING.md`](RELEASING.md).
+Before the first upload to the mod portal: [`RELEASING.md`](RELEASING.md).
 
-## Lizenz
+## History
 
-MIT — siehe [`mod/fdash-exporter/LICENSE`](mod/fdash-exporter/LICENSE).
+The original design collected without a mod, purely over RCON. It is preserved for context in
+[`factorio-dashboard-plan.md`](factorio-dashboard-plan.md) and
+[`QUESTIONS.md`](QUESTIONS.md) — both describe an architecture that no longer exists.
+
+## License
+
+MIT — see [`LICENSE`](LICENSE).

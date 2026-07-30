@@ -1,125 +1,124 @@
-# Factorio Dashboard — Projektplan
+# Factorio Dashboard — project plan
 
-> **Historisches Dokument.** Dieser Plan beschreibt die erste Fassung, die ohne Mod
-> ausschließlich über RCON `/silent-command` sammelte. Genau daran ist sie gescheitert: die
-> Auswertung lief komplett im Game-Tick und hat den Server spürbar ausgebremst — der in §5.2
-> als Reserve vorgesehene `ModQuery`-Weg ist inzwischen der einzige.
+> **Historical document.** This plan describes the first version, which collected purely over
+> RCON `/silent-command` without a mod. That is exactly where it failed: the whole evaluation
+> ran inside the game tick and noticeably slowed the server down — the `ModQuery` route kept
+> in reserve in §5.2 is now the only one.
 >
-> Der aktuelle Aufbau steht in [`README.md`](README.md) und
-> [`mod/fdash-exporter/README.md`](mod/fdash-exporter/README.md). Was hier über Datenmodelle,
-> Metriken und Frontend steht, gilt weiterhin; was über RCON-Snippets, Job-Scheduling im
-> Collector und Chunk-Paginierung steht, ist überholt.
+> The current design is described in [`README.md`](README.md) and
+> [`mod/fdash-exporter/README.md`](mod/fdash-exporter/README.md). What this document says about
+> data models, metrics and the frontend still holds; what it says about RCON snippets, job
+> scheduling in the collector and chunk pagination is obsolete.
 
-Ein Zweitbildschirm-Dashboard für Factorio (Space Age) mit C#-Collector und Web-Frontend.
-**Kein Mod erforderlich** — die Datenerfassung läuft ausschließlich über `/silent-command` via RCON,
-damit Mitspieler nichts installieren müssen.
+A second-screen dashboard for Factorio (Space Age) with a C# collector and a web frontend.
+**No mod required** — data collection runs purely over `/silent-command` via RCON, so fellow
+players do not have to install anything.
 
 ---
 
-## 1. Architektur
+## 1. Architecture
 
 ```
 ┌────────────────────┐        RCON/TCP        ┌──────────────────────────┐
-│ Factorio Headless  │◄──────────────────────►│  Collector (C#, .NET 9)  │
-│  (unmodifiziert)   │  /silent-command ...   │  - RCON-Client           │
-│                    │                        │  - Lua-Snippet-Registry  │
-│  script-output/ ───┼───── optional ────────►│  - Scan-State (Chunks)   │
-└────────────────────┘   (großer Payload)     │  - Scheduler (Jobs)      │
-                                              │  - Time-Series-Writer    │
+│ Factorio headless  │◄──────────────────────►│  Collector (C#, .NET 9)  │
+│  (unmodified)      │  /silent-command ...   │  - RCON client           │
+│                    │                        │  - Lua snippet registry  │
+│  script-output/ ───┼───── optional ────────►│  - scan state (chunks)   │
+└────────────────────┘   (large payloads)     │  - scheduler (jobs)      │
+                                              │  - time-series writer    │
                                               └────────┬─────────────────┘
                                                        │
                                               ┌────────▼─────────────────┐
-                                              │  SQLite (Roll-up-Tiers)  │
-                                              │  (Alternative: DuckDB)   │
+                                              │  SQLite (roll-up tiers)  │
+                                              │  (alternative: DuckDB)   │
                                               └────────┬─────────────────┘
                                                        │
                                               ┌────────▼─────────────────┐
                                               │ ASP.NET Core Web API     │
-                                              │  + SignalR (Push)        │
-                                              │  + statisches SPA        │
+                                              │  + SignalR (push)        │
+                                              │  + static SPA            │
                                               └──────────────────────────┘
 ```
 
-### Warum kein Mod
+### Why no mod
 
-Factorio synchronisiert die Mod-Liste beim Verbinden. Jedes geladene Mod — auch ein reines
-Script-Mod ohne Prototypen — muss auf **allen** Clients liegen. Es gibt keinen "server-only"-Flag,
-weil das Mod `storage`-State hält und im Determinismus-Lockstep mitläuft.
+Factorio syncs the mod list on connect. Every loaded mod — even a pure script mod with no
+prototypes — has to exist on **all** clients. There is no "server-only" flag, because a mod
+holds `storage` state and participates in the deterministic lockstep.
 
-Da das Dashboard nur auf dem Server läuft und Mitspieler es nicht nutzen, wäre eine Mod-Pflicht
-reiner Reibungsverlust. Stattdessen schickt der Collector den Lua-Code bei jedem Poll selbst als
-String.
+Since the dashboard only runs on the server and fellow players do not use it, requiring a mod
+would be pure friction. Instead the collector sends the Lua code itself, as a string, on every
+poll.
 
-### Was dadurch anders wird
+### What that changes
 
-| | Mod-Variante | `/silent-command` (gewählt) |
+| | mod variant | `/silent-command` (chosen) |
 |---|---|---|
-| Client-Installation | nötig | **keine** |
-| Entity-Registry | inkrementell via Events | Full-Scan pro Poll |
-| Tick-Verteilung teurer Scans | im Mod | **im Collector, über mehrere Polls** |
-| State zwischen Aufrufen | `storage` | **C#-seitig im Collector** |
-| Statistik-Abfragen (Strom, Produktion) | O(1) | O(1), identisch |
+| Client installation | required | **none** |
+| Entity registry | incremental via events | full scan per poll |
+| Spreading expensive scans over ticks | in the mod | **in the collector, across polls** |
+| State between calls | `storage` | **C# side, in the collector** |
+| Statistics queries (power, production) | O(1) | O(1), identical |
 
-Der kritische Punkt ist der Ressourcen-Scan (§3.4) — der wird deshalb Collector-seitig in
-Kartenausschnitte zerlegt. Assembler-, Zug- und Logistik-Scans sind auch als Einmal-Scan
-schnell genug.
+The critical point is the resource scan (§3.4) — which is therefore split into map sections on
+the collector side. Assembler, train and logistics scans are fast enough even as one-shot
+scans.
 
 ### Achievements
 
-`/silent-command` markiert das Save als "commands used" und deaktiviert Achievements —
-genau wie ein Mod. Falls euch Achievements wichtig sind, ist das ein K.-o.-Kriterium für
-**beide** Varianten. Vorab klären.
+`/silent-command` marks the save as "commands used" and disables achievements — exactly like a
+mod does. If achievements matter to you, that is a deal-breaker for **both** variants. Settle
+it up front.
 
-### Sicherheit
+### Security
 
-Wer RCON-Zugriff hat, kann beliebiges Lua ausführen. Deshalb:
+Anyone with RCON access can execute arbitrary Lua. Therefore:
 
-- `--rcon-bind 127.0.0.1:27015`, wenn Collector und Server auf derselben Maschine laufen
-- Sonst WireGuard oder SSH-Tunnel — RCON ist unverschlüsselt und gehört nicht offen ins Netz
+- `--rcon-bind 127.0.0.1:27015` when collector and server run on the same machine
+- Otherwise WireGuard or an SSH tunnel — RCON is unencrypted and has no business being exposed
 
 ---
 
-## 2. Lua-Snippet-Layer
+## 2. Lua snippet layer
 
-Statt eines Mods hält der Collector die Lua-Snippets als eingebettete Ressourcen.
+Instead of a mod, the collector keeps the Lua snippets as embedded resources.
 
-### 2.1 Struktur
+### 2.1 Structure
 
 ```
 Fdash.Collector/
   Lua/
-    _prelude.lua        -- gemeinsame Helper, wird jedem Snippet vorangestellt
+    _prelude.lua        -- shared helpers, prepended to every snippet
     meta.lua
-    prototypes.lua      -- einmaliger Export nach script-output/
+    prototypes.lua      -- one-shot export to script-output/
     assemblers.lua
     trains.lua
     power.lua
-    resources_chunk.lua -- parametrisiert: Chunk-Bereich
+    resources_chunk.lua -- parameterised: chunk range
     logistics.lua
     platforms.lua
     production.lua
     circuits.lua
-    set_research.lua    -- einziger schreibender Call
+    set_research.lua    -- the only writing call
 ```
 
-### 2.2 Aufrufmuster
+### 2.2 Call pattern
 
 ```
 /silent-command rcon.print(helpers.table_to_json(<snippet>))
 ```
 
-Snippets werden vor dem Senden minifiziert (Kommentare und überflüssige Whitespaces raus),
-weil die Command-Länge in den RCON-Payload eingeht.
+Snippets are minified before sending (comments and redundant whitespace stripped), because
+command length counts against the RCON payload.
 
-**Parametrisierung:** Platzhalter im Snippet werden C#-seitig ersetzt, z.B.
-`__SURFACE__` → `"nauvis"`, `__CHUNK_FROM__` / `__CHUNK_TO__` für den Ressourcen-Scan.
-Werte müssen sauber escaped werden — Surface-Namen kommen zwar aus einer vertrauenswürdigen
-Quelle (dem Server selbst), aber ein Snippet-Injection-Bug wäre hier gleichbedeutend mit
-Remote-Code-Execution.
+**Parameterisation:** placeholders in the snippet are substituted on the C# side, e.g.
+`__SURFACE__` → `"nauvis"`, `__CHUNK_FROM__` / `__CHUNK_TO__` for the resource scan. Values
+have to be escaped properly — surface names do come from a trusted source (the server itself),
+but a snippet injection bug here would amount to remote code execution.
 
 ### 2.3 Prelude
 
-Jedem Snippet vorangestellt, definiert wiederkehrende Helper:
+Prepended to every snippet, defines the recurring helpers:
 
 ```lua
 local F = game.forces.player
@@ -132,23 +131,23 @@ local function statflow(stats, name, cat)
 end
 ```
 
-### 2.4 Payload-Größe
+### 2.4 Payload size
 
-RCON-Antworten sind ab ~4 kB fragmentiert; Factorio handhabt das, aber sehr große Payloads
-(> 1 MB) sind riskant. Gegenmaßnahmen:
+RCON responses fragment from roughly 4 kB up; Factorio handles that, but very large payloads
+(> 1 MB) are risky. Countermeasures:
 
-1. **Aggregate statt Rohdaten** — nie einzelne Entities zurückgeben, immer schon in Lua gruppieren
-2. **`helpers.write_file`** für große Snapshots nach `script-output/`, der Collector liest die Datei
-3. Fallback auf RCON, wenn kein gemeinsamer Dateizugriff besteht (§5.4)
+1. **Aggregates instead of raw data** — never return individual entities, always group in Lua
+2. **`helpers.write_file`** for large snapshots into `script-output/`, the collector reads the file
+3. Fall back to RCON when there is no shared file access (§5.4)
 
 ---
 
-## 3. Datenmodell pro Modul
+## 3. Data model per module
 
-### 3.1 Assembler / Maschinen
+### 3.1 Assemblers / machines
 
-Erfasst werden alle crafting-machine-artigen Typen: `assembling-machine`, `furnace`,
-`rocket-silo`, plus modded Typen via `prototypes`-Iteration.
+Covers all crafting-machine-like types: `assembling-machine`, `furnace`, `rocket-silo`, plus
+modded types via `prototypes` iteration.
 
 ```json
 {
@@ -165,20 +164,20 @@ Erfasst werden alle crafting-machine-artigen Typen: `assembling-machine`, `furna
 }
 ```
 
-`entity.status` liefert das `defines.entity_status`-Enum. Das Mapping der numerischen Werte auf
-lesbare Strings passiert im Lua-Snippet, damit das Frontend keine Enum-Tabelle pflegen muss.
-Unbekannte (modded) Status-Werte werden als `unknown_<n>` durchgereicht.
+`entity.status` returns the `defines.entity_status` enum. Mapping the numeric values to
+readable strings happens in the Lua snippet, so the frontend does not have to maintain an enum
+table. Unknown (modded) status values pass through as `unknown_<n>`.
 
-**Generische Mod-Unterstützung:** keine Whitelist. Alle Rezepte/Items kommen aus
-`prototypes.recipe` / `prototypes.item`.
+**Generic mod support:** no whitelist. All recipes and items come from `prototypes.recipe` /
+`prototypes.item`.
 
-**Lokalisierte Namen:** `entity.localised_name` lässt sich RCON-seitig nicht auflösen. Lösung:
-einmaliger Export der Prototyp-Namen beim Collector-Start (§5.4).
+**Localised names:** `entity.localised_name` cannot be resolved over RCON. Solution: a one-off
+export of the prototype names when the collector starts (§5.4).
 
-**Aufwand:** Full-Scan pro Poll über `find_entities_filtered{type=...}`. Bei großen Basen die
-Aggregation direkt in Lua durchführen, nie Entity-Listen zurückgeben.
+**Cost:** full scan per poll via `find_entities_filtered{type=...}`. On large bases, do the
+aggregation directly in Lua and never return entity lists.
 
-### 3.2 Züge
+### 3.2 Trains
 
 ```json
 {
@@ -191,13 +190,13 @@ Aggregation direkt in Lua durchführen, nie Entity-Listen zurückgeben.
 }
 ```
 
-Quelle: `game.train_manager.get_trains{}` → `train.state` (`defines.train_state`).
-Problem-States: `no_path`, `path_lost`, `no_schedule`, `destination_full`, `manual_control`,
-`manual_control_stop`. Zusätzlich: Züge ohne Schedule im Automatik-Modus.
+Source: `game.train_manager.get_trains{}` → `train.state` (`defines.train_state`). Problem
+states: `no_path`, `path_lost`, `no_schedule`, `destination_full`, `manual_control`,
+`manual_control_stop`. Plus trains in automatic mode without a schedule.
 
-Nur Problemzüge werden übertragen, der Rest als Zähler — hält den Payload klein.
+Only problem trains are transmitted, the rest as counters — that keeps the payload small.
 
-### 3.3 Strom
+### 3.3 Power
 
 ```json
 {
@@ -214,15 +213,15 @@ Nur Problemzüge werden übertragen, der Rest als Zähler — hält den Payload 
 }
 ```
 
-Quelle: `force.get_electric_network_statistics(surface)` bzw. `entity.electric_network_statistics`
-eines beliebigen Pols pro Netz, mit
+Source: `force.get_electric_network_statistics(surface)`, or
+`entity.electric_network_statistics` of any pole per network, with
 `get_flow_count{name=..., category="input"/"output", precision_index=defines.flow_precision_index.one_minute}`.
 
-Netz-Identifikation: Pole nach `electric_network_id` gruppieren. Mehrere isolierte Netze pro
-Planet werden alle gelistet, sortiert nach Größe. Statistik-Abfragen sind billig — hier ändert
-sich gegenüber der Mod-Variante nichts.
+Network identification: group poles by `electric_network_id`. Multiple isolated networks per
+planet are all listed, sorted by size. Statistics queries are cheap — nothing changes here
+compared to the mod variant.
 
-### 3.4 Ressourcen
+### 3.4 Resources
 
 ```json
 {
@@ -247,44 +246,44 @@ sich gegenüber der Mod-Variante nichts.
 }
 ```
 
-**Das ist der teuerste Job.** `find_entities_filtered{type="resource"}` über eine große Karte
-kann zehntausende Entities liefern und in einem einzigen Tick den Server spürbar stocken lassen —
-im Multiplayer merken das alle.
+**This is the most expensive job.** `find_entities_filtered{type="resource"}` across a large
+map can return tens of thousands of entities and visibly stall the server in a single tick —
+in multiplayer, everyone notices.
 
-**Chunked-Scan-Strategie (Collector-seitig):**
+**Chunked scan strategy (collector side):**
 
-1. Collector holt einmalig die Chunk-Bounds der Surface
-2. Pro Poll wird nur ein Ausschnitt gescannt (Startwert: ~200 Chunks), parametrisiert über
+1. The collector fetches the surface's chunk bounds once
+2. Each poll scans only one section (starting value: ~200 chunks), parameterised via
    `__CHUNK_FROM__` / `__CHUNK_TO__`
-3. Teilergebnisse werden in C# akkumuliert
-4. Nach dem letzten Ausschnitt: Gesamtergebnis publizieren, Zyklus neu starten
+3. Partial results accumulate in C#
+4. After the last section: publish the total, restart the cycle
 
-Bei 5s-Poll und z.B. 20 Ausschnitten ergibt das einen vollständigen Ressourcen-Stand alle
-100 Sekunden. Die Ausschnittsgröße gehört in die Config und sollte anhand der tatsächlichen
-Tick-Zeit auf eurem Server kalibriert werden.
+At a 5 s poll and, say, 20 sections, that yields a complete resource picture every 100 seconds.
+The section size belongs in the config and should be calibrated against the actual tick time on
+your server.
 
-Drills werden separat und günstiger gescannt (deutlich weniger Entities), deshalb eigener Job
-mit kürzerem Intervall.
+Drills are scanned separately and more cheaply (far fewer entities), hence their own job with a
+shorter interval.
 
-**Berechnung `rate_max`** — Summe über alle Drills der theoretischen Rate bei Status `working`:
+**Computing `rate_max`** — sum over all drills of the theoretical rate at status `working`:
 
 ```
 rate = mining_speed_prototype × speed_modifier(modules+beacons)
        × productivity_multiplier / mining_time_of_resource
 ```
 
-Für unendliche Ressourcen zusätzlich der Yield-Faktor (`amount / normal_resource_amount`).
+For infinite resources, additionally the yield factor (`amount / normal_resource_amount`).
 
-**`rate_current`:** über `force.get_item_production_statistics(surface).get_flow_count` für das
-geförderte Item — die real gemessene Rate. Fallback: `rate_max × (working_drills / total_drills)`,
-wenn das Item aus mehreren Quellen kommt.
+**`rate_current`:** via `force.get_item_production_statistics(surface).get_flow_count` for the
+mined item — the actually measured rate. Fallback: `rate_max × (working_drills / total_drills)`
+when the item comes from several sources.
 
-**`depletion_seconds`:** `covered_amount / rate_current`. "Covered" = nur Erz unter aktiven
-Drill-Abdeckungen. Das ist die ehrlichere Zahl, weil unerschlossene Patches die aktuelle
-Fördermenge nicht verlängern. Beide Werte werden ausgeliefert; das Frontend zeigt primär
-`covered`, `total` als Sekundärinfo.
+**`depletion_seconds`:** `covered_amount / rate_current`. "Covered" means only ore under active
+drill coverage. That is the more honest number, because untapped patches do not extend the
+current output. Both values are delivered; the frontend shows `covered` primarily and `total`
+as secondary information.
 
-### 3.5 Logistik / Roboter
+### 3.5 Logistics / robots
 
 ```json
 {
@@ -299,14 +298,14 @@ Fördermenge nicht verlängern. Beide Werte werden ausgeliefert; das Frontend ze
 }
 ```
 
-Quelle pro Netzwerk: `network.available_logistic_robots`, `network.all_logistic_robots`, plus
-Iteration über `network.cells` für `charging_robot_count` und `to_charge_robot_count`.
-Es gilt `working = all - available - charging - waiting`.
+Source per network: `network.available_logistic_robots`, `network.all_logistic_robots`, plus
+iteration over `network.cells` for `charging_robot_count` and `to_charge_robot_count`. The
+identity is `working = all - available - charging - waiting`.
 
-`waiting_for_charge` ist der wichtigste Alarmwert — ein hoher Anteil bedeutet
-Roboport-Unterversorgung.
+`waiting_for_charge` is the most important alarm value — a high share means the roboports are
+undersized.
 
-### 3.6 Plattformen (Space Age)
+### 3.6 Platforms (Space Age)
 
 ```json
 {
@@ -326,10 +325,11 @@ Roboport-Unterversorgung.
 }
 ```
 
-`max` = Summe der Fluid-Kapazitäten aller Thruster + verbundener Tanks im Netz. Warnung bei
-`pct < 0.25` oder wenn das Oxidizer/Fuel-Verhältnis stark abweicht (Thruster brauchen beides).
+`max` = sum of the fluid capacities of all thrusters plus connected tanks in the network.
+Warning at `pct < 0.25`, or when the oxidizer/fuel ratio drifts far apart (thrusters need
+both).
 
-### 3.7 Orbital Requests
+### 3.7 Orbital requests
 
 ```json
 {
@@ -340,11 +340,11 @@ Roboport-Unterversorgung.
 }
 ```
 
-Quelle: Planeten-Logistikgruppen / `surface.platform`-Verknüpfungen und die Hub-Requests der
-Plattformen mit Ziel = dieser Planet. Die Space-Age-API ist hier noch etwas in Bewegung —
-Detailerkundung in Phase 3.
+Source: planetary logistics groups / `surface.platform` links, and the hub requests of
+platforms whose destination is this planet. The Space Age API is still somewhat in motion here
+— detailed exploration in phase 3.
 
-### 3.8 Produktions-Ratio & Fehlproduktions-Warnung
+### 3.8 Production ratio and stall warning
 
 ```json
 {
@@ -358,51 +358,51 @@ Detailerkundung in Phase 3.
 }
 ```
 
-Quelle: `force.get_item_production_statistics(surface)` mit `flow_precision_index.one_minute`.
+Source: `force.get_item_production_statistics(surface)` with `flow_precision_index.one_minute`.
 
-**Stall-Logik:** Ein Item wird nur gemeldet, wenn
+**Stall logic:** an item is only reported when
 
-- `produced_per_min == 0` (bzw. unter Schwellwert), **und**
-- mindestens eine Maschine mit diesem Rezept existiert, **und**
-- deren Status `no_ingredients` / `no_power` / `low_power` / `no_fluid` ist — **nicht** `output_full`
+- `produced_per_min == 0` (or below a threshold), **and**
+- at least one machine with that recipe exists, **and**
+- its status is `no_ingredients` / `no_power` / `low_power` / `no_fluid` — **not** `output_full`
 
-Damit fällt "Produktion steht, weil Lager voll" korrekt weg.
+That correctly drops "production stopped because storage is full".
 
-`since_seconds` führt zwingend der Collector — ohne Mod-`storage` gibt es Lua-seitig keinen
-Zustand zwischen Polls. Das passt ohnehin besser, weil der Wert dann Neustarts des Servers
-übersteht.
+`since_seconds` necessarily lives in the collector — without a mod's `storage` there is no
+state between polls on the Lua side. That fits better anyway, because the value then survives
+server restarts.
 
-**Korrelation:** Die Stall-Erkennung braucht Daten aus zwei Jobs (`production` + `assemblers`).
-Sie läuft deshalb im Collector als abgeleiteter Job, nicht in Lua.
+**Correlation:** stall detection needs data from two jobs (`production` + `assemblers`). It
+therefore runs in the collector as a derived job, not in Lua.
 
-### 3.9 Getaggte Circuits
+### 3.9 Tagged circuits
 
-Opt-in per Konvention: ein Constant Combinator wird mit dem Präfix `FDASH:` benannt bzw.
-beschrieben. Beispiel: `FDASH:Ölvorrat` an einem Kombinator, dessen Signale dann im Dashboard
-als benannte Kachel erscheinen.
+Opt-in by convention: a constant combinator is named or described with the prefix `FDASH:`.
+Example: `FDASH:Oil reserve` on a combinator, whose signals then appear in the dashboard as a
+named tile.
 
 ```json
 {
   "tags": [
-    { "label": "Ölvorrat", "surface": "nauvis", "signals": { "crude-oil": 240000, "petroleum-gas": 18000 } }
+    { "label": "Oil reserve", "surface": "nauvis", "signals": { "crude-oil": 240000, "petroleum-gas": 18000 } }
   ]
 }
 ```
 
-Erfassung über `find_entities_filtered{type="constant-combinator"}` + Prüfung auf
-`entity.combinator_description` oder Backer-Name.
+Collected via `find_entities_filtered{type="constant-combinator"}` plus a check on
+`entity.combinator_description` or the backer name.
 
 ---
 
-## 4. Command-Protokoll
+## 4. Command protocol
 
-### 4.1 Standard-Call
+### 4.1 Standard call
 
 ```
-/silent-command rcon.print(helpers.table_to_json( <minifiziertes Snippet> ))
+/silent-command rcon.print(helpers.table_to_json( <minified snippet> ))
 ```
 
-### 4.2 Discovery beim Start
+### 4.2 Discovery at startup
 
 ```
 /silent-command rcon.print(helpers.table_to_json({
@@ -414,27 +414,27 @@ Erfassung über `find_entities_filtered{type="constant-combinator"}` + Prüfung 
 }))
 ```
 
-### 4.3 Save-Identifikation
+### 4.3 Save identification
 
-Ohne Mod gibt es kein persistentes `storage` und damit keine selbst vergebene `save_id`.
-Ersatz: ein stabiler Fingerprint aus Werten, die pro Save eindeutig und über Neustarts konstant
-sind — Map-Seed, Force-Erstellungstick, Surface-Liste:
+Without a mod there is no persistent `storage` and therefore no self-assigned `save_id`.
+Substitute: a stable fingerprint from values that are unique per save and constant across
+restarts — map seed, force creation tick, surface list:
 
 ```lua
 local seed = game.surfaces.nauvis.map_gen_settings.seed
 ```
 
-Der Collector bildet daraus einen Hash = `save_id`. Wechselt der Server das Save, ändert sich
-der Fingerprint und es entsteht automatisch eine neue Zeitreihe.
+The collector hashes those into a `save_id`. When the server switches saves, the fingerprint
+changes and a new time series is created automatically.
 
-**Grenzfall:** Zwei Saves aus demselben Seed (z.B. eine Kopie zum Testen) kollidieren. Falls
-das relevant wird, kann der `save_name` aus den Server-Settings in den Hash einfließen — dann
-kollidiert dafür ein umbenanntes Save. Für den Anfang reicht der Seed; die Konfiguration
-erlaubt zusätzlich eine manuell gesetzte `save_id` als Override.
+**Edge case:** two saves from the same seed (e.g. a copy for testing) collide. Should that
+become relevant, `save_name` from the server settings can go into the hash — at which point a
+renamed save collides instead. The seed is enough to start with; the configuration also allows
+a manually set `save_id` as an override.
 
 ### 4.4 Batching
 
-Mehrere Jobs pro Roundtrip in ein Snippet zusammenfassen:
+Combine several jobs per round trip into one snippet:
 
 ```
 /silent-command rcon.print(helpers.table_to_json({
@@ -444,12 +444,12 @@ Mehrere Jobs pro Roundtrip in ein Snippet zusammenfassen:
 }))
 ```
 
-Reduziert Roundtrips, aber: alles läuft in **einem** Tick. Teure Jobs (Ressourcen) gehören
-deshalb nie ins Batch, sondern immer in einen eigenen Call.
+Fewer round trips, but: everything runs in **one** tick. Expensive jobs (resources) therefore
+never belong in a batch, always in their own call.
 
-### 4.5 Schreibender Call
+### 4.5 The writing call
 
-Nur einer, für Auto-Research (§6):
+Only one, for auto-research (§6):
 
 ```
 /silent-command
@@ -460,30 +460,30 @@ Nur einer, für Auto-Research (§6):
   else rcon.print("rejected") end
 ```
 
-Validierung passiert im Snippet selbst, nicht nur im Collector.
+Validation happens in the snippet itself, not only in the collector.
 
 ---
 
-## 5. Collector & Persistenz (C#)
+## 5. Collector and persistence (C#)
 
-### 5.1 Projektstruktur
+### 5.1 Project structure
 
 ```
 FactorioDashboard.sln
   src/
-    Fdash.Core/        -- Modelle, DTOs, Interfaces
-    Fdash.Rcon/        -- RCON-Client (Source RCON Protocol)
-    Fdash.Lua/         -- Snippets (embedded), Minifier, Parametrisierung
-    Fdash.Collector/   -- Scheduler, Job-Runner, Scan-State, Mapping
-    Fdash.Storage/     -- Time-Series Repository
-    Fdash.Api/         -- ASP.NET Core, SignalR, statisches Hosting
-  web/                 -- Frontend-Sourcen
+    Fdash.Core/        -- models, DTOs, interfaces
+    Fdash.Rcon/        -- RCON client (Source RCON protocol)
+    Fdash.Lua/         -- snippets (embedded), minifier, parameterisation
+    Fdash.Collector/   -- scheduler, job runner, scan state, mapping
+    Fdash.Storage/     -- time-series repository
+    Fdash.Api/         -- ASP.NET Core, SignalR, static hosting
+  web/                 -- frontend sources
 ```
 
-Ein self-contained Deployment: `dotnet publish -r linux-x64` bzw. `win-x64`, läuft auf beiden
-Plattformen. Konfiguration über `appsettings.json` + Umgebungsvariablen.
+One self-contained deployment: `dotnet publish -r linux-x64` or `win-x64`, runs on both
+platforms. Configuration via `appsettings.json` plus environment variables.
 
-### 5.2 Abstraktion für spätere Mod-Option
+### 5.2 Abstraction for a later mod option
 
 ```csharp
 public interface IGameQuery
@@ -492,13 +492,13 @@ public interface IGameQuery
 }
 ```
 
-Implementierungen:
+Implementations:
 
-- `ScriptQuery` — `/silent-command` mit Lua-Snippets **(Standard)**
-- `ModQuery` — `remote.call`, falls sich später herausstellt, dass ein Mod nötig ist
+- `ScriptQuery` — `/silent-command` with Lua snippets **(default)**
+- `ModQuery` — `remote.call`, in case a mod turns out to be necessary later
 
-Die Datenmodelle sind in beiden Fällen identisch. Diese Abstraktion kostet fast nichts und hält
-die Tür offen, ohne dass jetzt ein Mod gebaut werden muss.
+The data models are identical either way. This abstraction costs almost nothing and keeps the
+door open without having to build a mod now.
 
 ### 5.3 Scheduler
 
@@ -513,36 +513,36 @@ new JobSpec("circuits",    TimeSpan.FromSeconds(5),  Persist: true,  Batchable: 
 new JobSpec("production",  TimeSpan.FromSeconds(10), Persist: true,  Batchable: true),
 new JobSpec("platforms",   TimeSpan.FromSeconds(10), Persist: true,  Batchable: false),
 new JobSpec("drills",      TimeSpan.FromSeconds(30), Persist: true,  Batchable: false),
-new JobSpec("resources",   TimeSpan.FromSeconds(5),  Persist: true,  Batchable: false), // chunked, voller Zyklus ~100s
+new JobSpec("resources",   TimeSpan.FromSeconds(5),  Persist: true,  Batchable: false), // chunked, full cycle ~100s
 ```
 
-Resilienz: exponentielles Backoff bei RCON-Fehlern, automatischer Reconnect, Erkennung von
-Save-Wechsel über den Fingerprint (§4.3) in jeder Discovery-Antwort.
+Resilience: exponential backoff on RCON errors, automatic reconnect, save-change detection via
+the fingerprint (§4.3) in every discovery response.
 
-**Adaptive Drosselung:** Der Collector misst die Ausführungsdauer jedes Calls. Steigt sie über
-einen Schwellwert, wird die Chunk-Größe des Ressourcen-Scans automatisch reduziert. Das
-verhindert, dass ein wachsendes Save irgendwann unbemerkt Server-Lag verursacht.
+**Adaptive throttling:** the collector measures the execution time of each call. If it rises
+above a threshold, the chunk size of the resource scan is reduced automatically. That prevents
+a growing save from silently causing server lag at some point.
 
-### 5.4 Prototyp-Export
+### 5.4 Prototype export
 
-Beim Start schickt der Collector einmalig ein Snippet, das alle Prototyp-Namen und
-Lokalisierungen nach `script-output/fdash_prototypes.json` schreibt.
+At startup the collector sends a one-off snippet that writes all prototype names and
+localisations to `script-output/fdash_prototypes.json`.
 
-- **Gemeinsamer Dateizugriff vorhanden** (gleiche Maschine / gemeinsames Volume):
-  Collector liest die Datei direkt → `ScriptOutputPath` in der Config
-- **Kein Dateizugriff:** Fallback über RCON in mehreren Seiten (paginiert, da die Liste bei
-  vielen Mods groß wird)
+- **Shared file access available** (same machine / shared volume): the collector reads the file
+  directly → `ScriptOutputPath` in the config
+- **No file access:** fall back to RCON in several pages (paginated, since the list gets large
+  with many mods)
 
-Der Export läuft bei jedem Collector-Start neu — kostet nichts und fängt Mod-Änderungen am
-Server automatisch ab.
+The export runs again on every collector start — it costs nothing and picks up mod changes on
+the server automatically.
 
-### 5.5 Zeitreihen-Speicher
+### 5.5 Time-series storage
 
-**Empfehlung: SQLite mit manuellem Roll-up statt RRD.**
+**Recommendation: SQLite with manual roll-up rather than RRD.**
 
-RRD hat zwar die passende Semantik (feste Größe, automatische Aggregation), aber: keine gute
-.NET-Bibliothek, keine Ad-hoc-Queries, schlecht für dynamische Serien-Namen (bei modded Items
-sind die Metriken nicht im Voraus bekannt).
+RRD has the right semantics (fixed size, automatic aggregation), but: no good .NET library, no
+ad-hoc queries, and it is poorly suited to dynamic series names (with modded items the metrics
+are not known in advance).
 
 ```sql
 CREATE TABLE samples (
@@ -555,119 +555,118 @@ CREATE TABLE samples (
 ) WITHOUT ROWID;
 ```
 
-Roll-up-Job (stündlich):
+Roll-up job (hourly):
 
-| Auflösung | Retention | Zweck |
+| Resolution | Retention | Purpose |
 |---|---|---|
-| 5 s | 6 h | Live-Graphen |
-| 1 min | 7 Tage | Tagesverlauf |
-| 15 min | 90 Tage | Langzeit |
-| 1 h | unbegrenzt | Historie |
+| 5 s | 6 h | live graphs |
+| 1 min | 7 days | daily view |
+| 15 min | 90 days | long term |
+| 1 h | unlimited | history |
 
-Jede Stufe eine eigene Tabelle, Aggregat = avg/min/max. Alternative bei wachsender Datenmenge:
-DuckDB (spaltenorientiert, gute Kompression, brauchbare .NET-Bindings) — deshalb das Repository
-hinter einem Interface halten, dann ist ein späterer Wechsel billig.
+Each tier its own table, aggregate = avg/min/max. Alternative as the data grows: DuckDB
+(columnar, good compression, usable .NET bindings) — which is why the repository stays behind
+an interface, so a later switch is cheap.
 
 ---
 
-## 6. Auto-Research
+## 6. Auto-research
 
-**Metrik "schnellste Forschung":**
+**Metric "fastest research":**
 
 ```
-zeit = Σ(pack_count_i × units) / effektive_lab_rate
+time = Σ(pack_count_i × units) / effective_lab_rate
 ```
 
-Voraussetzung: alle benötigten Pack-Typen sind verfügbar. "Verfügbar" heißt: Pack existiert im
-Logistik-/Lab-Netzwerk **und** wird aktiv produziert (Produktionsrate > 0). Ohne die zweite
-Bedingung wählt der Algorithmus eine Tech, die sofort blockiert.
+Precondition: all required pack types are available. "Available" means the pack exists in the
+logistic/lab network **and** is actively being produced (production rate > 0). Without the
+second condition the algorithm picks a tech that blocks immediately.
 
-Effektive Lab-Rate = `Anzahl aktiver Labs × lab_speed × (1 + research_speed_bonus)`.
+Effective lab rate = `number of active labs × lab_speed × (1 + research_speed_bonus)`.
 
-**Algorithmus:**
+**Algorithm:**
 
-1. Kandidaten = alle Techs mit erfüllten Prerequisites, nicht `researched`, nicht auf Blacklist
-2. Filter: alle `research_unit_ingredients` sind produzierte Packs
-3. Score = geschätzte Zeit in Sekunden
-4. Min-Score gewinnt; bei Gleichstand niedrigerer Tech-Level
+1. Candidates = all techs with satisfied prerequisites, not `researched`, not blacklisted
+2. Filter: all `research_unit_ingredients` are packs being produced
+3. Score = estimated time in seconds
+4. Lowest score wins; on a tie, the lower tech level
 
-Die Auswahl läuft **im Collector**, nicht in Lua — dort liegen die Produktionsdaten und die
-Blacklist-Config ohnehin schon.
+The selection runs **in the collector**, not in Lua — the production data and the blacklist
+config already live there.
 
-**Sicherheitsregeln:**
+**Safety rules:**
 
-- Nur aktiv, wenn die Research-Queue leer ist
-- Blacklist konfigurierbar (Präfix-Matching, z.B. alle `*-productivity-*` Infinite-Techs)
-- Optional: Max-Level-Grenze für Infinite-Techs
-- Toggle im Frontend, Zustand persistiert im Collector — ein Save-Reload aktiviert den
-  Automatismus nicht ungewollt
-- Serverseitige Validierung im Snippet selbst (§4.5)
-- Audit-Log jeder Änderung: bei einem Automatismus, der ins Save eingreift, sollte
-  nachvollziehbar sein, was wann warum gesetzt wurde
+- Only active when the research queue is empty
+- Configurable blacklist (prefix matching, e.g. all `*-productivity-*` infinite techs)
+- Optional: maximum level for infinite techs
+- Toggle in the frontend, state persisted in the collector — a save reload does not silently
+  re-enable the automation
+- Server-side validation in the snippet itself (§4.5)
+- Audit log of every change: for an automation that writes into the save, it should be
+  traceable what was set, when, and why
 
 ---
 
 ## 7. Frontend
 
-**Stack:** React + TypeScript + Vite, Tailwind, uPlot für Graphen (bei vielen Datenpunkten
-deutlich performanter als Recharts). Build-Output als `wwwroot` in die ASP.NET-App —
-ein Prozess, ein Port, kein CORS.
+**Stack:** React + TypeScript + Vite, Tailwind, uPlot for graphs (considerably faster than
+Recharts with many data points). Build output as `wwwroot` in the ASP.NET app — one process,
+one port, no CORS.
 
-**Transport:** SignalR-Hub pusht Snapshots, kein Polling im Browser. Historische Daten über REST
-(`GET /api/series?metric=...&from=...&to=...&resolution=...`).
+**Transport:** a SignalR hub pushes snapshots, no polling in the browser. Historical data over
+REST (`GET /api/series?metric=...&from=...&to=...&resolution=...`).
 
-### Layout — Zweitbildschirm, ohne Interaktion lesbar
+### Layout — second screen, readable without interaction
 
 ```
 ┌─ Overview ──────────────────────────────────────────────────┐
-│ [Nauvis] [Vulcanus] [Fulgora] [Gleba] [Aquilo] [Platforms]  │  ← Planeten-Tabs
+│ [Nauvis] [Vulcanus] [Fulgora] [Gleba] [Aquilo] [Platforms]  │  ← planet tabs
 ├──────────────┬──────────────┬──────────────┬────────────────┤
 │ POWER        │ RESEARCH     │ ALERTS       │ ROBOTS         │
-│ 1.24 / 1.30GW│ Logistics 3  │ ⚠ 3 Züge     │ 810/1200 aktiv │
-│ ████████░ 96%│ ~4m 12s      │ ⚠ Steel 0.83 │ ⚠ 22 warten    │
-│ Akku ▓▓▓ 72% │ [auto: ON]   │ ⚠ LDS stalled│    auf Ladung  │
+│ 1.24 / 1.30GW│ Logistics 3  │ ⚠ 3 trains   │ 810/1200 active│
+│ ████████░ 96%│ ~4m 12s      │ ⚠ Steel 0.83 │ ⚠ 22 waiting   │
+│ Accu ▓▓▓ 72% │ [auto: ON]   │ ⚠ LDS stalled│    to charge   │
 ├──────────────┴──────────────┴──────────────┴────────────────┤
-│ MASCHINEN (nach Rezept, sortiert nach Problemen)            │
+│ MACHINES (by recipe, sorted by problems)                    │
 │ electronic-circuit   240  ▓▓▓▓▓▓▓▓▓░ 231 ok  7 no_ingr      │
 │ steel-plate          180  ▓▓▓▓▓▓░░░░ 120 ok 60 output_full  │
 ├──────────────────────────────┬──────────────────────────────┤
-│ ERZE            [Scan 14/20] │ PRODUKTIONS-RATIO            │
+│ ORES            [scan 14/20] │ PRODUCTION RATIO             │
 │ iron-ore  1840/1980  ~16h    │ steel-plate    0.83 ↓        │
 │ copper    1200/1200  ~22h    │ green-circuit  1.02 →        │
 └──────────────────────────────┴──────────────────────────────┘
 ```
 
-Der Scan-Fortschritt (`14/20`) beim Ressourcen-Panel macht sichtbar, dass die Erz-Zahlen aus
-einem laufenden Zyklus stammen und nicht sekundenaktuell sind. Zusätzlich ein Zeitstempel
-"zuletzt vollständig: vor 47s".
+The scan progress (`14/20`) on the resources panel makes it visible that the ore numbers come
+from a running cycle and are not second-accurate. Plus a timestamp: "last complete: 47s ago".
 
-**Tabs:** Overview · Maschinen · Züge · Strom · Ressourcen · Logistik · Plattformen ·
-Produktion · Circuits · Verlauf · Einstellungen
+**Tabs:** Overview · Machines · Trains · Power · Resources · Logistics · Platforms ·
+Production · Circuits · History · Settings
 
-**Ampel-Farbcodierung** durchgängig: grün ok, gelb Warnung, rot kritisch. Der Sinn eines
-Zweitbildschirm-Dashboards ist, dass ein Blick reicht — Probleme deshalb immer nach oben
-sortieren und farblich dominant machen, statt sie in Tabellen verschwinden zu lassen.
+**Traffic-light colour coding** throughout: green ok, yellow warning, red critical. The point
+of a second-screen dashboard is that a glance suffices — so always sort problems to the top and
+make them visually dominant instead of letting them disappear into tables.
 
 ---
 
-## 8. Setup & Betrieb
+## 8. Setup and operation
 
-### 8.1 Server-Seite
+### 8.1 Server side
 
-Kein Mod, keine Installation — nur RCON aktivieren:
+No mod, no installation — just enable RCON:
 
 ```bash
 ./bin/x64/factorio \
-  --start-server saves/meinsave.zip \
+  --start-server saves/mysave.zip \
   --server-settings data/server-settings.json \
   --rcon-bind 127.0.0.1:27015 \
-  --rcon-password "geheim"
+  --rcon-password "secret"
 ```
 
-`--rcon-bind 127.0.0.1` wenn Collector und Server auf derselben Maschine laufen. Sonst
-`--rcon-port` + WireGuard/SSH-Tunnel.
+Use `--rcon-bind 127.0.0.1` when collector and server run on the same machine. Otherwise
+`--rcon-port` plus a WireGuard or SSH tunnel.
 
-### 8.2 Collector-Seite
+### 8.2 Collector side
 
 `appsettings.json`:
 
@@ -676,7 +675,7 @@ Kein Mod, keine Installation — nur RCON aktivieren:
   "Factorio": {
     "Host": "127.0.0.1",
     "RconPort": 27015,
-    "RconPassword": "geheim",
+    "RconPassword": "secret",
     "ScriptOutputPath": "/opt/factorio/script-output",
     "SaveIdOverride": null
   },
@@ -690,88 +689,88 @@ Kein Mod, keine Installation — nur RCON aktivieren:
 Start:
 
 ```bash
-./Fdash.Api            # oder: dotnet Fdash.Api.dll
+./Fdash.Api            # or: dotnet Fdash.Api.dll
 ```
 
-Dashboard unter `http://localhost:5000`.
+Dashboard at `http://localhost:5000`.
 
-### 8.3 Startsequenz
+### 8.3 Startup sequence
 
-1. RCON-Verbindung aufbauen
-2. Discovery-Call → Version, Surfaces, Save-Fingerprint
-3. Prototyp-Export anstoßen und einlesen
-4. Scheduler starten
+1. Establish the RCON connection
+2. Discovery call → version, surfaces, save fingerprint
+3. Trigger and read the prototype export
+4. Start the scheduler
 
-### 8.4 Verbindung testen
+### 8.4 Testing the connection
 
-Vor der ersten Zeile Code:
+Before the first line of code:
 
 ```bash
-mcrcon -H 127.0.0.1 -P 27015 -p geheim "/silent-command rcon.print(game.tick)"
+mcrcon -H 127.0.0.1 -P 27015 -p secret "/silent-command rcon.print(game.tick)"
 ```
 
-Kommt eine Zahl zurück, steht der Datenpfad und Phase 0 ist im Wesentlichen validiert.
+If a number comes back, the data path works and phase 0 is essentially validated.
 
 ---
 
-## 9. Umsetzungsphasen
+## 9. Implementation phases
 
-| Phase | Inhalt | Ergebnis |
+| Phase | Content | Result |
 |---|---|---|
-| **0** | RCON-Client, Snippet-Infrastruktur, Discovery, Save-Fingerprint, Prototyp-Export | Verbindung steht, Daten fließen |
-| **1** | Power, Assembler, Züge + SQLite-Storage + minimales Dashboard | Erste nutzbare Version |
-| **2** | Ressourcen (chunked scan), Drills, Logistik, Produktions-Ratio, Stall-Detection | Kern-Feature-Set |
-| **3** | Space Age: Plattformen, Orbital Requests, Multi-Surface-Tabs | Space-Age-vollständig |
-| **4** | Auto-Research (erst read-only Vorschau, dann Schreibzugriff) | Automatik |
-| **5** | Zeitreihen-Graphen, Roll-up, Verlaufs-Tab | Historie |
-| **6** | Circuits, Icons, Polish, konfigurierbare Alert-Schwellwerte | Fertig |
+| **0** | RCON client, snippet infrastructure, discovery, save fingerprint, prototype export | connection stands, data flows |
+| **1** | Power, assemblers, trains + SQLite storage + minimal dashboard | first usable version |
+| **2** | Resources (chunked scan), drills, logistics, production ratio, stall detection | core feature set |
+| **3** | Space Age: platforms, orbital requests, multi-surface tabs | Space Age complete |
+| **4** | Auto-research (read-only preview first, then write access) | automation |
+| **5** | Time-series graphs, roll-up, history tab | history |
+| **6** | Circuits, icons, polish, configurable alert thresholds | done |
 
-**Phase 2 ist die riskanteste** — dort zeigt sich, ob der Chunked-Ressourcen-Scan ohne
-spürbaren Server-Lag durchläuft. Deshalb früh gegen das echte Save messen und nicht gegen eine
-kleine Testkarte. Falls es dort klemmt, ist der Zeitpunkt gekommen, die `ModQuery`-Variante
-(§5.2) für genau diesen einen Job nachzurüsten.
+**Phase 2 is the riskiest** — that is where it shows whether the chunked resource scan runs
+without noticeable server lag. So measure early against the real save, not against a small test
+map. If it stalls there, that is the moment to retrofit the `ModQuery` variant (§5.2) for that
+one job.
 
-**Phase 4 bewusst nach dem Kern:** Auto-Research ist das einzige Feature, das schreibend
-eingreift. Erst bauen, wenn der Datenpfad vertrauenswürdig ist — und selbst dann zuerst als
-Vorschau ("würde jetzt X setzen"), damit sich die Auswahl-Logik gegen das eigene Urteil prüfen
-lässt, bevor sie autonom läuft.
-
----
-
-## 10. Offene Punkte
-
-1. **Achievements** — Vorab mit den Mitspielern klären: `/silent-command` deaktiviert sie
-   dauerhaft für das Save. Höchste Priorität, weil es das ganze Projekt betrifft.
-2. **Tick-Kosten messen** — wie teuer ist ein Assembler-Full-Scan auf eurem tatsächlichen Save?
-   Bestimmt, ob 5s-Intervalle realistisch sind.
-3. **Space-Age-API für Orbital Requests** — gegen die aktuelle Doku verifizieren; die
-   Platform-Logistics-API hat sich zwischen 2.0-Releases geändert.
-4. **Alert-Schwellwerte** — hart kodiert oder pro Save konfigurierbar? Empfehlung: JSON-Config
-   mit sinnvollen Defaults.
-5. **Authentifizierung** — nur LAN oder über Reverse-Proxy erreichbar? Bei letzterem mindestens
-   Basic Auth vor dem SignalR-Hub, weil der Auto-Research-Endpunkt schreibend ist.
-6. **Icons** — modded Item-Icons aus den Mod-Zips extrahieren wäre machbar, ist aber Aufwand.
-   Phase 6 oder weglassen?
+**Phase 4 deliberately comes after the core:** auto-research is the only feature that writes.
+Build it only once the data path is trustworthy — and even then as a preview first ("would set
+X now"), so the selection logic can be checked against your own judgement before it runs
+autonomously.
 
 ---
 
-## 11. Entscheidungen (bereits festgelegt)
+## 10. Open points
 
-| Thema | Entscheidung |
+1. **Achievements** — settle with fellow players up front: `/silent-command` disables them
+   permanently for the save. Highest priority, because it affects the entire project.
+2. **Measure tick cost** — how expensive is an assembler full scan on your actual save? That
+   determines whether 5 s intervals are realistic.
+3. **Space Age API for orbital requests** — verify against the current docs; the platform
+   logistics API changed between 2.0 releases.
+4. **Alert thresholds** — hard-coded or configurable per save? Recommendation: JSON config with
+   sensible defaults.
+5. **Authentication** — LAN only, or reachable through a reverse proxy? For the latter, at
+   least basic auth in front of the SignalR hub, because the auto-research endpoint writes.
+6. **Icons** — extracting modded item icons from the mod zips would be feasible, but it is
+   work. Phase 6, or drop it?
+
+---
+
+## 11. Decisions (already settled)
+
+| Topic | Decision |
 |---|---|
 | Transport | RCON |
-| Datenerfassung | **`/silent-command`, kein Mod** (Mitspieler müssen nichts installieren) |
-| Betriebsmodus | Nur Host/Dedicated Server |
-| Space Age | Ja, inkl. generischer Mod-Item-Unterstützung |
+| Data collection | **`/silent-command`, no mod** (fellow players install nothing) |
+| Operating mode | host / dedicated server only |
+| Space Age | yes, including generic modded-item support |
 | Backend | C#, Linux + Windows |
-| Poll-Intervall | 5s Standard, längere Intervalle für teure Jobs |
-| Ressourcen-Scan | Chunked über mehrere Polls, Akkumulation im Collector |
-| Maschinen-Diagnose | `entity.status` reicht, aggregiert pro Rezept |
-| Gruppierung | Pro Planet/Surface |
-| Zug-Probleme | Nur State-basiert, kein "wartet ungewöhnlich lange" |
-| Ressourcen | Pro Planet; bei unendlichen nur akt./max. Förderrate |
-| `rate_max` | Alle Miner arbeiten (theoretisches Maximum) |
-| Auto-Research | Schnellste mit aktuell verfügbaren Packs, nur bei leerer Queue, setzt aktiv |
-| Historie | Zeitreihen-DB mit Roll-up |
-| Multi-Save | Ja, über Fingerprint (Map-Seed-Hash) |
-| Layout | Dashboard-Übersicht + Detail-Tabs |
+| Poll interval | 5 s by default, longer for expensive jobs |
+| Resource scan | chunked across several polls, accumulated in the collector |
+| Machine diagnostics | `entity.status` is enough, aggregated per recipe |
+| Grouping | per planet/surface |
+| Train problems | state-based only, no "waiting unusually long" |
+| Resources | per planet; for infinite ones only current/max extraction rate |
+| `rate_max` | all miners working (theoretical maximum) |
+| Auto-research | fastest with currently available packs, only on an empty queue, writes actively |
+| History | time-series DB with roll-up |
+| Multi-save | yes, via fingerprint (map seed hash) |
+| Layout | dashboard overview + detail tabs |

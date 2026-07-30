@@ -8,7 +8,7 @@ on:
 
 jobs:
   backend:
-    name: Backend (build + Selbsttests)
+    name: Backend (build + self-tests)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,15 +20,15 @@ jobs:
       - name: Build
         run: dotnet build FactorioDashboard.sln -c Release
 
-      # Beide Diagnose-/Testprojekte liegen ausserhalb der Solution und wuerden
-      # sonst unbemerkt verrotten.
+      # Both diagnostic/test projects live outside the solution and would
+      # otherwise rot unnoticed.
       - name: Build tools
         run: |
           dotnet build tests/Fdash.Tests -c Release
           dotnet build tests/Fdash.LiveCheck -c Release
 
-      # Liefert die Anzahl fehlgeschlagener Checks als Exit-Code.
-      - name: Selbsttests
+      # Returns the number of failed checks as the exit code.
+      - name: Self-tests
         run: dotnet run --project tests/Fdash.Tests -c Release --no-build
 
   frontend:
@@ -50,7 +50,7 @@ jobs:
         working-directory: web
 
   mod:
-    name: Mod (Lua-Pruefungen + Paket)
+    name: Mod (Lua checks + packaging)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -62,14 +62,14 @@ jobs:
       - run: npm install --no-audit --no-fund
         working-directory: mod/tools
 
-      # Syntax, unerwartete Globals, Cross-Modul-Aufrufe.
-      - name: Lua-Pruefungen
+      # Syntax, unexpected globals, cross-module calls.
+      - name: Lua checks
         run: node check-lua.js ../fdash-exporter
         working-directory: mod/tools
 
-      # info.json und changelog.txt muessen zusammenpassen, sonst lehnt das
-      # Mod-Portal den Upload ab.
-      - name: info.json und changelog pruefen
+      # info.json and changelog.txt have to agree, otherwise the mod portal
+      # rejects the upload.
+      - name: Validate info.json and changelog
         shell: bash
         run: |
           set -euo pipefail
@@ -81,7 +81,7 @@ jobs:
             exit 1
           fi
 
-          # Die Trennlinie im Factorio-Changelog muss exakt 99 Bindestriche haben.
+          # The Factorio changelog separator must be exactly 99 dashes.
           if ! grep -qx -- "-\{99\}" mod/fdash-exporter/changelog.txt; then
             echo "::error::changelog.txt separator line is not exactly 99 dashes"
             exit 1
