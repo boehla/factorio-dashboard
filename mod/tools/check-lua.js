@@ -30,6 +30,11 @@ const ALLOWED_GLOBALS = new Set([
   'table_size', 'localised_print', 'mods',
 ]);
 
+// `data` existiert nur in der Data-Stage. Sie nur dort zu erlauben haelt den
+// Check fuer den Control-Stage-Code scharf: dort waere `data` ein Tippfehler.
+const DATA_STAGE_FILES = new Set(['settings.lua', 'data.lua', 'data-updates.lua', 'data-final-fixes.lua']);
+const DATA_STAGE_GLOBALS = new Set(['data']);
+
 const root = path.resolve(process.argv[2] || '../fdash-exporter');
 if (!fs.existsSync(root)) {
   console.error(`Mod directory not found: ${root}`);
@@ -69,11 +74,14 @@ console.log(`syntax: ${files.length} files OK`);
 // -------------------------------------------------------------- 2. Globals
 for (const f of files) {
   const seen = new Map();
+  const allowed = DATA_STAGE_FILES.has(rel(f))
+    ? new Set([...ALLOWED_GLOBALS, ...DATA_STAGE_GLOBALS])
+    : ALLOWED_GLOBALS;
   luaparse.parse(asts.get(f).code, {
     luaVersion: '5.2', scope: true, locations: true,
     onCreateNode(node) {
       if (node.type === 'Identifier' && node.isLocal === false
-          && !ALLOWED_GLOBALS.has(node.name) && !seen.has(node.name)) {
+          && !allowed.has(node.name) && !seen.has(node.name)) {
         seen.set(node.name, node.loc.start.line);
       }
     },

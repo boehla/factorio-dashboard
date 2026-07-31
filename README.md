@@ -43,8 +43,9 @@ powershell -ExecutionPolicy Bypass -File .\mod\build-mod.ps1 -Install
 ```
 
 This packs `mod/fdash-exporter` into `mod/dist/fdash-exporter_<version>.zip` and drops it into
-`%APPDATA%\Factorio\mods`. For a dedicated server, copy the zip to wherever that server's
-`mods` directory lives. Then restart Factorio or the server.
+`%APPDATA%\Factorio\mods`. A portable Factorio (zip package) keeps its mods under the install
+directory instead — pass `-ModsDir C:\path\to\Factorio\mods`. For a dedicated server, copy the
+zip to wherever that server's `mods` directory lives. Then restart Factorio or the server.
 
 On first start the mod scans the map once, in chunks. On large maps that takes a minute or
 two; `meta.exporter.scanning` reports the progress while it runs.

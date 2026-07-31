@@ -126,6 +126,17 @@ Start with the defaults. If the dashboard updates too slowly for your taste, rai
 budget — the relationship is close to linear, and the cost is paid evenly rather than in
 spikes. If you are chasing every last UPS on a megabase, lower it; the data simply gets older.
 
+**Measured cost.** On a Pyanodons base (2600 assemblers, 660 drills, 20000 poles, 17400 ore
+chunks, Factorio 2.0.77) at the default budget of 400, benchmarked over 1800 ticks with the
+mod enabled and disabled:
+
+- without the mod: 9.6 / 10.0 ms per tick
+- with the mod: 10.3 / 11.1 ms per tick
+
+So roughly **0.8–1.1 ms per tick**, about 5 % of the 16.7 ms a 60 UPS tick has to spend. It is
+paid evenly: no spike in either run came from the exporter. That is the number the budget
+scales — halve it and you roughly halve the cost, at the price of a longer pass.
+
 `remote.call("fdash", "status")` reports registry sizes, which tells you how long a pass takes:
 roughly `entities / budget` ticks.
 

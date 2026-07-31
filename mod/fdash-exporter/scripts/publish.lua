@@ -38,6 +38,15 @@ publish.jstr = jstr
 -- --------------------------------------------------------------- Ablegen
 
 --- Ergebnis eines abgeschlossenen Durchlaufs uebernehmen.
+---
+--- Anmerkung zu den Zahlen im Snapshot: helpers.table_to_json schreibt jeden
+--- nicht-ganzzahligen Double in voller Dezimalentwicklung aus — 1.6 wird zu
+--- "1.600000000000000088817841970012523233890533447265625". Ein Runden auf n
+--- Nachkommastellen bringt dagegen nichts: 0.333 ist als Double genauso wenig
+--- exakt und druckt genauso lang. Kuerzer wird nur, was exakt ganzzahlig ist.
+--- Gemessen an einer echten Py-Karte liessen sich so keine 2 % der Payload
+--- sparen, und nur um den Preis, Maschinengeschwindigkeiten und Verhaeltnisse
+--- auf ganze Zahlen zu runden. Bleibt bewusst wie es ist.
 function publish.set(key, payload)
   local ok, json = pcall(function() return helpers.table_to_json(payload) end)
   if not ok then

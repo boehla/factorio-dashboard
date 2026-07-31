@@ -1,8 +1,10 @@
 ---------------------------------------------------------------------------------------------------
 Version: 0.1.0
-Date: 2026-07-30
+Date: 2026-07-31
   Features:
     - Initial release.
+    - Runtime settings for the per-tick entity budget, the chunk budget, the write interval,
+      the ore scan and the mining-radius refresh, all changeable while the game runs.
     - Exports power, machines, production, trains, logistics, circuits, drills, ore patches,
       research candidates and Space Age platforms for an external dashboard.
     - Snapshot output to script-output/fdash/ with rotating files and an index for tear-free reads.

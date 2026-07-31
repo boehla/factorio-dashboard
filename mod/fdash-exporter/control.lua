@@ -178,5 +178,14 @@ commands.add_command("fdash-status",
   function(event)
     local player = event.player_index and game.get_player(event.player_index)
     local text = remote.call("fdash", "status")
-    if player then player.print(text) else log(text) end
+    if player then
+      player.print(text)
+    else
+      -- Kein player_index heisst Server-Konsole oder RCON. rcon.print schreibt
+      -- an den aufrufenden RCON-Client und ist ausserhalb einer RCON-Sitzung
+      -- wirkungslos, deshalb zusaetzlich ins Log — sonst bliebe der Aufruf
+      -- ueber RCON ohne jede Ausgabe.
+      rcon.print(text)
+      log(text)
+    end
   end)

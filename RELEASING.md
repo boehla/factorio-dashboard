@@ -7,11 +7,28 @@
 | Mod name `fdash-exporter` on the portal | available (as of 2026-07-30) |
 | Thumbnail, changelog, locale, LICENSE | present |
 | CI (`.github/workflows/ci.yml`) | builds backend + frontend, runs self-tests and Lua checks |
-| Backend compiles | **unverified** — no .NET SDK was installed on the development machine |
-| Mod loaded in Factorio | **unverified** — no Factorio was installed there |
+| Backend compiles | verified by CI |
+| Mod loaded in Factorio | verified 2026-07-31 on 2.0.77 + Pyanodons (see below) |
 
-The last two rows are the real remaining risk. The first push resolves the first one through
-CI; the second needs an actual start of the game (see "Test before uploading").
+### What the in-game test covered
+
+Run against a Pyanodons save (2600 assemblers, 660 drills, 20000 poles, 17400 chunks) on a
+headless server, Factorio 2.0.77:
+
+- Mod loads, initial scan completes, all ten collectors publish plausible data.
+- Snapshot rotation, `index.json` and the prototype export (10117 recipes) all work; the
+  snapshot structure matches what `ModSnapshotParser` expects.
+- Save/load: registry survives, no second initial scan.
+- Both transports: file output and `remote.call("fdash", …)` over RCON.
+- Cost ~0.8–1.1 ms per tick at the default budget (details in the mod README).
+
+It found three bugs, all fixed: settings were declared in a `settings.json`, which Factorio
+does not read at all (so every setting silently fell back to its default and the entity budget
+could not be changed); `/fdash-status` printed nothing when called over RCON; and an empty
+train cargo serialised as `{}` where the consumer expects a list.
+
+What is still untested: Space Age (the save has no Space Age, so `platforms` and `orbital`
+never ran), multiplayer with actual clients, and auto-research actually writing.
 
 ## Before the very first commit
 
@@ -77,6 +94,14 @@ To test locally before uploading:
 
 ```bash
 powershell -ExecutionPolicy Bypass -File .\mod\build-mod.ps1 -Install
+```
+
+`-Install` targets `%APPDATA%\Factorio\mods`. A portable install (a zip package, recognisable
+by `config-path.cfg` with `use-system-read-write-data-directories=false`) keeps its mods under
+the install directory instead — point `-ModsDir` at it:
+
+```bash
+powershell -ExecutionPolicy Bypass -File .\mod\build-mod.ps1 -Install -ModsDir C:\Data\Factorio\mods
 ```
 
 ## Test before uploading

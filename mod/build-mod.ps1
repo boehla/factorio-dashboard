@@ -8,14 +8,24 @@
   einer Stelle gepflegt werden muss.
 
 .PARAMETER Install
-  Kopiert die ZIP zusaetzlich nach %APPDATA%\Factorio\mods und entfernt dort
-  aeltere Versionen desselben Mods.
+  Kopiert die ZIP zusaetzlich in das Mod-Verzeichnis und entfernt dort aeltere
+  Versionen desselben Mods.
+
+.PARAMETER ModsDir
+  Zielverzeichnis fuer -Install. Ohne Angabe %APPDATA%\Factorio\mods. Eine
+  portable Installation (config-path.cfg mit
+  use-system-read-write-data-directories=false) legt ihre Mods dagegen unter
+  dem Installationsordner ab, z.B. C:\Data\Factorio\mods.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\mod\build-mod.ps1 -Install
+
+.EXAMPLE
+  powershell -ExecutionPolicy Bypass -File .\mod\build-mod.ps1 -Install -ModsDir C:\Data\Factorio\mods
 #>
 param(
-    [switch]$Install
+    [switch]$Install,
+    [string]$ModsDir
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,7 +51,7 @@ New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
 
 # Nur die Dateien, die ins Release gehoeren. Alles andere (Notizen, .bak, ...)
 # bleibt aussen vor, damit die ZIP reproduzierbar bleibt.
-$include = @("info.json", "settings.json", "control.lua", "changelog.txt", "LICENSE", "README.md", "thumbnail.png")
+$include = @("info.json", "settings.lua", "control.lua", "changelog.txt", "LICENSE", "README.md", "thumbnail.png")
 foreach ($f in $include) {
     $src = Join-Path $modRoot $f
     if (Test-Path $src) { Copy-Item $src -Destination $stageDir }
@@ -77,10 +87,10 @@ $size = [math]::Round((Get-Item $zipPath).Length / 1KB, 1)
 Write-Host "Built $zipPath ($size KB)"
 
 if ($Install) {
-    $modsDir = Join-Path $env:APPDATA "Factorio\mods"
-    if (-not (Test-Path $modsDir)) { throw "Factorio mods directory not found: $modsDir" }
-    Get-ChildItem $modsDir -Filter "${name}_*.zip" | Remove-Item -Force
-    Copy-Item $zipPath -Destination $modsDir -Force
-    Write-Host "Installed to $modsDir"
+    if ($ModsDir) { $targetDir = $ModsDir } else { $targetDir = Join-Path $env:APPDATA "Factorio\mods" }
+    if (-not (Test-Path $targetDir)) { throw "Factorio mods directory not found: $targetDir (use -ModsDir for a portable install)" }
+    Get-ChildItem $targetDir -Filter "${name}_*.zip" | Remove-Item -Force
+    Copy-Item $zipPath -Destination $targetDir -Force
+    Write-Host "Installed to $targetDir"
     Write-Host "Restart Factorio (or the headless server) to load it."
 }

@@ -87,9 +87,29 @@ jobs:
             exit 1
           fi
 
-          for f in control.lua info.json settings.json thumbnail.png changelog.txt LICENSE; do
+          for f in control.lua info.json settings.lua thumbnail.png changelog.txt LICENSE; do
             test -f "mod/fdash-exporter/$f" || { echo "::error::missing mod/fdash-exporter/$f"; exit 1; }
           done
+
+          # Factorio ignores a settings.json without a word of complaint, and the
+          # mod then silently runs on the fallbacks in config.lua. Every setting
+          # config.lua reads has to be declared in settings.lua.
+          node -e '
+            const fs = require("fs");
+            if (fs.existsSync("mod/fdash-exporter/settings.json")) {
+              console.log("::error::settings.json is not read by Factorio — declare settings in settings.lua");
+              process.exit(1);
+            }
+            const decl = fs.readFileSync("mod/fdash-exporter/settings.lua", "utf8");
+            const cfg = fs.readFileSync("mod/fdash-exporter/scripts/config.lua", "utf8");
+            const used = [...cfg.matchAll(/"(fdash-[a-z-]+)"/g)].map(m => m[1]);
+            const missing = [...new Set(used)].filter(n => !decl.includes(`name = "${n}"`));
+            if (missing.length) {
+              console.log("::error::settings read by config.lua but not declared in settings.lua: " + missing.join(", "));
+              process.exit(1);
+            }
+            console.log("settings.lua declares all " + new Set(used).size + " settings used by config.lua");
+          '
 
           if grep -rq "SET-ME" mod/fdash-exporter/; then
             echo "::warning::mod still contains SET-ME placeholders — fill them before uploading to the portal"

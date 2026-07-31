@@ -73,7 +73,9 @@ function job.run(st, _si, budget)
       surface = (loco and loco.valid) and loco.surface.name or nil,
       state = sname,
       schedule_station = station,
-      cargo = top
+      -- Eine leere Lua-Tabelle serialisiert als {} statt []. Der Consumer
+      -- erwartet hier eine Liste, deshalb den Schluessel lieber ganz weglassen.
+      cargo = #top > 0 and top or nil
     }
   end)
 

@@ -82,7 +82,7 @@ jobs:
           if ($roots.Count -ne 1) { throw "expected one top-level folder, got: $($roots -join ', ')" }
           if ($roots[0] -ne "fdash-exporter_$version") { throw "unexpected root folder: $($roots[0])" }
 
-          foreach ($required in @("info.json", "control.lua", "settings.json", "thumbnail.png")) {
+          foreach ($required in @("info.json", "control.lua", "settings.lua", "thumbnail.png")) {
             if ($names -notcontains "fdash-exporter_$version/$required") { throw "missing $required" }
           }
           Write-Host "zip layout OK ($($names.Count) entries)"
