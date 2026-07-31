@@ -1,0 +1,215 @@
+name: Release
+
+# Fires on a version tag, e.g.:
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Produces a GitHub release carrying two artefacts:
+#   fdash-exporter_<version>.zip   the Factorio mod, ready to drop into mods/
+#   fdash-dashboard-win-x64.zip    the self-contained dashboard (exe + frontend)
+#
+# The mod is packaged by mod/build-mod.ps1 — the same script used locally, so
+# there is exactly one packaging implementation and no chance of drift. It runs
+# on a Windows runner because it works around a Windows PowerShell 5.1 quirk
+# (backslashes in zip entry names) and is tested against that shell.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  mod:
+    name: Package mod
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # A tag that disagrees with info.json would produce a release whose
+      # asset is named differently from the release itself.
+      - name: Check tag against info.json
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./mod/fdash-exporter/info.json').version")
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "info.json: $version / tag: $tag"
+          if [ "v$version" != "$tag" ]; then
+            echo "::error::tag $tag does not match info.json version $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # CI only warns about these; for a release they are a hard stop.
+      - name: Reject placeholders
+        shell: bash
+        run: |
+          if grep -rq "SET-ME" mod/fdash-exporter/ LICENSE; then
+            echo "::error::SET-ME placeholders left — fill author/contact/homepage/copyright first"
+            grep -rn "SET-ME" mod/fdash-exporter/ LICENSE || true
+            exit 1
+          fi
+
+      - name: Build mod zip
+        shell: powershell
+        run: .\mod\build-mod.ps1
+
+      # Guard against a silently broken package: Factorio needs exactly one
+      # top-level folder and forward slashes in the entry names.
+      - name: Verify zip layout
+        shell: powershell
+        run: |
+          $version = "${{ steps.check.outputs.version }}"
+          $zipPath = ".\mod\dist\fdash-exporter_$version.zip"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path $zipPath))
+          $names = $zip.Entries | ForEach-Object { $_.FullName }
+          $zip.Dispose()
+
+          $backslash = @($names | Where-Object { $_ -like '*\*' }).Count
+          if ($backslash -gt 0) { throw "$backslash entries use backslashes as separators" }
+
+          $roots = $names | ForEach-Object { ($_ -split '/')[0] } | Sort-Object -Unique
+          if ($roots.Count -ne 1) { throw "expected one top-level folder, got: $($roots -join ', ')" }
+          if ($roots[0] -ne "fdash-exporter_$version") { throw "unexpected root folder: $($roots[0])" }
+
+          foreach ($required in @("info.json", "control.lua", "settings.json", "thumbnail.png")) {
+            if ($names -notcontains "fdash-exporter_$version/$required") { throw "missing $required" }
+          }
+          Write-Host "zip layout OK ($($names.Count) entries)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mod
+          path: mod/dist/*.zip
+          if-no-files-found: error
+
+  dashboard:
+    name: Package dashboard
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # publish.ps1 builds the frontend into wwwroot and then publishes a
+      # single self-contained exe.
+      - name: Build
+        shell: powershell
+        run: .\publish.ps1
+
+      # The published appsettings.json ships with an empty RconPassword; make
+      # sure a local override never rides along.
+      - name: Strip local overrides
+        shell: powershell
+        run: |
+          Remove-Item -Force -ErrorAction SilentlyContinue .\publish\appsettings.Local.json
+          $cfg = Get-Content .\publish\appsettings.json -Raw | ConvertFrom-Json
+          if ($cfg.Collector.RconPassword) { throw "published appsettings.json contains an RCON password" }
+          Write-Host "no secrets in published config"
+
+      - name: Zip
+        shell: powershell
+        run: |
+          Add-Type -AssemblyName System.IO.Compression
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $out = ".\fdash-dashboard-win-x64.zip"
+          $zip = [System.IO.Compression.ZipFile]::Open((New-Item -ItemType File -Path $out -Force).FullName, 'Update')
+          try {
+            $root = (Resolve-Path .\publish).Path
+            foreach ($item in Get-ChildItem -Path $root -Recurse -File) {
+              $name = $item.FullName.Substring($root.Length + 1).Replace('\', '/')
+              [void][System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                $zip, $item.FullName, $name, [System.IO.Compression.CompressionLevel]::Optimal)
+            }
+          } finally { $zip.Dispose() }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dashboard
+          path: fdash-dashboard-win-x64.zip
+          if-no-files-found: error
+
+  publish:
+    name: Create release
+    runs-on: ubuntu-latest
+    needs: [mod, dashboard]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # Release notes come from the changelog block for this version, so the
+      # portal changelog and the GitHub release never diverge.
+      - name: Extract release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ needs.mod.outputs.version }}"
+          # Deliberately matching on "-----" rather than "-{99}": the default
+          # awk on Ubuntu runners is mawk, whose support for interval
+          # expressions cannot be relied on. No content line starts with five
+          # dashes, so this is just as precise.
+          awk -v ver="Version: $version" '
+            /^-----/   { if (found) exit; next }
+            $0 == ver  { found = 1; next }
+            /^Date:/   { next }
+            found      { print }
+          ' mod/fdash-exporter/changelog.txt > notes.md
+
+          if [ ! -s notes.md ]; then
+            echo "::error::no changelog block found for version $version"
+            exit 1
+          fi
+
+          {
+            echo ""
+            echo "## Install"
+            echo ""
+            echo "**Mod:** drop \`fdash-exporter_$version.zip\` into Factorio's \`mods/\` folder."
+            echo ""
+            echo "**Dashboard:** unpack \`fdash-dashboard-win-x64.zip\`, run \`Fdash.Api.exe\`, open <http://localhost:5000>."
+            echo ""
+            echo "The mod does nothing on its own — it has no GUI and no entities. See the [README](https://github.com/${{ github.repository }}#readme) for setup."
+          } >> notes.md
+
+          cat notes.md
+
+      # 0.x releases are marked as pre-release: the API is not settled and the
+      # version has not been through a broad round of real-world use yet.
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="${{ needs.mod.outputs.version }}"
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          case "$version" in
+            0.*) prerelease="--prerelease" ;;
+            *)   prerelease="" ;;
+          esac
+          gh release create "$tag" \
+            --title "v$version" \
+            --notes-file notes.md \
+            $prerelease \
+            artifacts/mod/*.zip \
+            artifacts/dashboard/*.zip

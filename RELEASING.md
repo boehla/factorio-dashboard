@@ -102,6 +102,26 @@ On every change:
    `mod/fdash-exporter/scripts/publish.lua` **and** `ModSnapshotParser.SupportedProtocol` in
    `src/Fdash.Core/ModSnapshot.cs`.
 
+## Cutting a GitHub release
+
+Pushing a version tag triggers `.github/workflows/release.yml`:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+That builds the mod zip and a self-contained Windows dashboard, then creates the release with
+both attached. Release notes come from the changelog block for that version, so the portal
+changelog and the GitHub release cannot drift apart.
+
+The workflow refuses to run if the tag disagrees with `version` in `info.json`, if any
+`SET-ME` placeholder is left, if the packaged zip has the wrong layout, or if the published
+`appsettings.json` somehow carries an RCON password. Versions starting with `0.` are marked
+as pre-release.
+
+To undo a release: delete it on GitHub, then `git push --delete origin v0.1.0`.
+
 ## Portal upload
 
 <https://mods.factorio.com/upload>. For the description, the content of
