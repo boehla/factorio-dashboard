@@ -44,8 +44,16 @@ function sweep.registry(st, si, types, budget, fn)
       scanned = scanned + 1
       if e ~= nil then
         if e.valid then
-          fn(e)
+          -- Der Callback darf Zusatzkosten zurueckgeben, wenn er fuer dieses
+          -- eine Entity etwas wesentlich Teureres getan hat als ein paar
+          -- Feldzugriffe (drills.lua misst per find_entities_filtered das Erz
+          -- im Foerderradius). Sie zaehlen SOFORT gegen das Budget — wird die
+          -- Zusatzarbeit erst nach der Schleife verrechnet, laeuft der Tick
+          -- munter weiter und das Budget schuetzt genau dann nicht, wenn es
+          -- gebraucht wird.
+          local extra = fn(e)
           spent = spent + 1
+          if type(extra) == "number" and extra > 0 then spent = spent + extra end
         else
           registry.release(b, slot)
         end

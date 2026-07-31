@@ -18,6 +18,16 @@ local TYPES = { "mining-drill" }
 
 local job = { name = "drills", per_surface = true, interval = 1800 }
 
+--- Was ein Flaechen-Scan im Budget kostet, ausgedrueckt in "Entities".
+---
+--- find_entities_filtered ueber den Foerderradius liefert je nach Bohrergroesse
+--- dutzende bis hunderte Erz-Entities, ist also um Groessenordnungen teurer als
+--- der uebrige Schleifenkoerper. Ohne diese Anrechnung konnte ein einzelner
+--- Tick so viele Flaechen-Scans machen, wie das Budget Entities erlaubt (per
+--- Default 400) — im F5-Overlay als 10-ms-Ausschlag messbar, waehrend der
+--- Durchschnitt bei 0,7 ms lag.
+local MEASURE_COST = 50
+
 --- Erzmenge im Foerderradius eines Bohrers.
 local function measure_covered(d, target_name)
   local proto = d.prototype
@@ -39,7 +49,6 @@ function job.run(st, si, budget)
     st.by_res = {}
     st.cov_v, st.cov_t = {}, {}
   end
-  st.extra = 0
 
   local by_res = st.by_res
   local tick = game.tick
@@ -72,11 +81,16 @@ function job.run(st, si, budget)
     local u = d.unit_number
     local v = old_v[u]
     local t = old_t[u]
+    local charged = nil
     if v == nil or t == nil or (tick - t) >= refresh then
-      -- Ein Area-Scan kostet ein Vielfaches des restlichen Schleifenkoerpers.
-      st.extra = st.extra + 20
       v = measure_covered(d, name)
-      t = tick
+      -- Zeitstempel pro Bohrer versetzen. Wuerde hier schlicht `tick` stehen,
+      -- fuellten sich alle Caches im selben Pass — und liefen 10 Minuten
+      -- spaeter auch alle im selben Pass wieder ab. Genau diese Herde ist der
+      -- periodische Ausschlag. u ist deterministisch, der Versatz also auf
+      -- allen Peers gleich und damit desync-sicher.
+      t = tick - (u % refresh)
+      charged = MEASURE_COST
     end
     cov_v[u] = v
     cov_t[u] = t
@@ -88,10 +102,10 @@ function job.run(st, si, budget)
     -- tatsaechlich vorhandene Gesamtmenge der Ressource; damit ist der Wert
     -- nach oben durch die Physik begrenzt statt durch eine teure Menge.
     r.covered = r.covered + v
+    return charged
   end)
 
-  local cost = spent + st.extra
-  if not done then return cost, nil end
+  if not done then return spent, nil end
 
   -- Pass fertig: Cache und geteiltes Ergebnis umschalten (Double-Buffer).
   storage.covered_v[si] = cov_v
@@ -105,7 +119,7 @@ function job.run(st, si, budget)
 
   local surface = game.surfaces[si]
   st.by_res, st.cov_v, st.cov_t = nil, nil, nil
-  return cost, {
+  return spent, {
     surface = surface and surface.name or tostring(si),
     drills = out
   }
