@@ -117,8 +117,24 @@ All runtime-global, changeable while the game runs.
 | Scan ore patches | on | the most expensive collector |
 | Ore-under-drill refresh | 10 min | how often drill coverage is re-measured |
 
-**Multiplayer note:** `helpers.write_file` writes on every peer. On a dedicated server that is
-just the server. On a listen server, clients can turn *Write snapshot files* off.
+## Multiplayer
+
+Two things are worth knowing before you install this on a server.
+
+**Files are written on the server only.** The snapshot goes out through
+`helpers.write_file(…, for_player = 0)`, and `0` means "only the server's output". Clients
+never write anything into their own `script-output`.
+
+**The collectors run on every client anyway.** Factorio simulates in lockstep: control-stage
+code executes on every peer, and the results live in `storage`, which has to stay identical
+everywhere or the game desyncs. A mod cannot decide to do less work on a client. So every
+player pays the same per-tick cost as the server — even though only the server does anything
+with the result.
+
+That is the honest trade. If a player is short on CPU, the lever is *Entity budget per tick*:
+it is a map-wide setting, so lowering it lowers the cost for everyone, and the only thing that
+suffers is how quickly the dashboard notices a change. Setting *Enable exporter* to off stops
+the collectors on all peers, server included.
 
 ## Tuning
 
