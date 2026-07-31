@@ -7,8 +7,9 @@
 | Mod name `fdash-exporter` on the portal | available (as of 2026-07-30) |
 | Thumbnail, changelog, locale, LICENSE | present |
 | CI (`.github/workflows/ci.yml`) | builds backend + frontend, runs self-tests and Lua checks |
-| Backend compiles | verified by CI |
+| Backend compiles | verified by CI and locally (0 warnings, 28/28 self-tests) |
 | Mod loaded in Factorio | verified 2026-07-31 on 2.0.77 + Pyanodons (see below) |
+| Mod to dashboard end to end | verified 2026-07-31, live data in the browser |
 
 ### What the in-game test covered
 
@@ -26,6 +27,11 @@ It found three bugs, all fixed: settings were declared in a `settings.json`, whi
 does not read at all (so every setting silently fell back to its default and the entity budget
 could not be changed); `/fdash-status` printed nothing when called over RCON; and an empty
 train cargo serialised as `{}` where the consumer expects a list.
+
+The whole chain was then run end to end against that save: mod writes snapshots, the collector
+picks them up over the file transport, `/api/snapshots` serves all ten jobs plus the derived
+ones, and the frontend renders live numbers in the browser. Item icons resolve for modded Py
+items too, from a `--dump-data` run.
 
 What is still untested: Space Age (the save has no Space Age, so `platforms` and `orbital`
 never ran), multiplayer with actual clients, and auto-research actually writing.

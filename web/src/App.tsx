@@ -96,7 +96,7 @@ export default function App() {
 
       {!isGraph && (
         <footer className="text-xs text-gray-600 text-center mt-2">
-          Kein Mod erforderlich · Datenerfassung über /silent-command · Planet: {planet}
+          Datenerfassung über den Mod fdash-exporter · Planet: {planet}
         </footer>
       )}
     </div>

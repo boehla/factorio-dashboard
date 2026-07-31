@@ -10,6 +10,13 @@ npm run build          # Output -> src\Fdash.Api\wwwroot
 Pop-Location
 
 Write-Host "2/2  API veröffentlichen (win-x64, self-contained)..." -ForegroundColor Cyan
+
+# wwwroot vorher leeren: dotnet publish ueberschreibt zwar, loescht aber nichts.
+# Vite vergibt pro Build neue Hash-Dateinamen, deshalb sammeln sich in einem
+# wiederverwendeten publish-Ordner sonst alle je gebauten Bundles an (lokal
+# schnell mehrere MB Leichen, die niemand mehr referenziert). Nur wwwroot, damit
+# eine bereits angelegte fdash.db daneben unangetastet bleibt.
+if (Test-Path "$root\publish\wwwroot") { Remove-Item "$root\publish\wwwroot" -Recurse -Force }
 dotnet publish "$root\src\Fdash.Api\Fdash.Api.csproj" -c Release -r win-x64 --self-contained true `
     /p:PublishSingleFile=true -o "$root\publish"
 
