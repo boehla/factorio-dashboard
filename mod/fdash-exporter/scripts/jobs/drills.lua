@@ -64,11 +64,24 @@ function job.run(st, si, budget)
 
     local r = by_res[name]
     if not r then
-      r = { total = 0, working = 0, rate_max = 0, covered = 0 }
+      r = { total = 0, working = 0, rate_max = 0, covered = 0, chunks = {} }
       by_res[name] = r
     end
     r.total = r.total + 1
     if d.status == defines.entity_status.working then r.working = r.working + 1 end
+
+    -- In welchem Chunk der Bohrer steht. Der Ressourcen-Job ordnet damit
+    -- Bohrer den einzelnen Erzfeldern zu, ohne dafuer einen eigenen Scan zu
+    -- brauchen — hier kostet es eine Division und einen Tabellenzugriff.
+    local pos = d.position
+    local ck = util.chunk_key_at(pos.x, pos.y)
+    local c = r.chunks[ck]
+    if c then
+      c.total = c.total + 1
+      if d.status == defines.entity_status.working then c.working = c.working + 1 end
+    else
+      r.chunks[ck] = { total = 1, working = (d.status == defines.entity_status.working) and 1 or 0 }
+    end
 
     -- theoretisches Maximum: alle Bohrer arbeiten
     local proto = d.prototype

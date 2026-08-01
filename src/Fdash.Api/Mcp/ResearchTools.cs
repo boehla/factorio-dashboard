@@ -138,6 +138,132 @@ public static class ResearchTools {
         });
     }
 
+    [McpServerTool(Name = "suggest_next_research")]
+    [Description("Bewertet die forschbaren Technologien und schlaegt welche vor. optimize_for: "
+        + "throughput (schnellste), cheapest (guenstigste), unlock_bottleneck (loest einen aktuell "
+        + "erkannten Engpass), progression (schaltet die meisten weiteren Technologien frei).")]
+    public static string SuggestNextResearch(
+            SnapshotView view, PrototypeExporter proto, IOptions<McpOptions> opts,
+            [Description("Anzahl Vorschlaege, Default 5")] int horizon = 5,
+            [Description("throughput | cheapest | unlock_bottleneck | progression")]
+            string optimizeFor = "throughput",
+            [Description("Oberflaeche, leer = Hauptoberflaeche")] string? surface = null) {
+        string surf = view.ResolveSurface(surface ?? opts.Value.DefaultSurface);
+        JobPayload? rs = view.Get("research_state", surf);
+        if(rs == null) return ToolResponse.NoData("research_state", surf);
+
+        Dictionary<string, (double Produced, double Consumed)> flows = productionFlows(view, surf);
+        double rate = labRate(rs.Data);
+
+        // Wie viele weitere Technologien direkt an einer haengen. Einmal ueber
+        // alle Prototypen, nicht pro Kandidat.
+        Dictionary<string, int> dependents = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach(TechProto t in proto.Technologies.Values) {
+            foreach(string pre in t.Prerequisites) {
+                dependents[pre] = (dependents.TryGetValue(pre, out int n) ? n : 0) + 1;
+            }
+        }
+
+        // Items, die gerade fehlen — aus der Problemliste, damit "loest einen
+        // Engpass" sich auf denselben Befund stuetzt wie get_problems.
+        HashSet<string> wanted = new HashSet<string>(StringComparer.Ordinal);
+        JobPayload? problems = view.Get("problems");
+        if(problems != null) {
+            foreach(JsonElement p in Json.Array(problems.Data, "problems")) {
+                string domain = Json.Str(p, "domain");
+                if(domain != "shortage" && domain != "machines" && domain != "fluids") continue;
+                foreach(string i in Json.StrList(p, "items")) wanted.Add(i);
+            }
+        }
+
+        List<(string Name, double Seconds, double Units, bool Affordable, int Unblocks, int Fixes,
+              List<string> Unlocks)> cands = new List<(string, double, double, bool, int, int, List<string>)>();
+
+        foreach(JsonElement c in Json.Array(rs.Data, "candidates")) {
+            string name = Json.Str(c, "name");
+            bool affordable = true;
+            foreach(JsonElement ing in Json.Array(c, "ingredients")) {
+                if(!flows.TryGetValue(Json.Str(ing, "name"), out (double P, double C) f) || f.P <= 0) {
+                    affordable = false;
+                    break;
+                }
+            }
+
+            double units = Json.Num(c, "unit_count");
+            double seconds = rate > 0 ? units * Json.Num(c, "energy") / rate : double.PositiveInfinity;
+
+            List<string> unlocks = proto.Technologies.TryGetValue(name, out TechProto? t)
+                ? t.UnlockedRecipes : new List<string>();
+
+            // Zaehlt, wie viele der freigeschalteten Rezepte etwas herstellen,
+            // das aktuell fehlt.
+            int fixes = 0;
+            foreach(string recipe in unlocks) {
+                if(!proto.Recipes.TryGetValue(recipe, out RecipeProto? r)) continue;
+                foreach(RecipeIo p in r.Products) {
+                    if(wanted.Contains(p.Name)) { fixes++; break; }
+                }
+            }
+
+            cands.Add((name, seconds, units, affordable, dependents.TryGetValue(name, out int dep) ? dep : 0,
+                fixes, unlocks));
+        }
+
+        // Nicht bezahlbare Technologien immer nach hinten: eine Empfehlung, fuer
+        // die die Pakete fehlen, ist keine.
+        Comparison<(string Name, double Seconds, double Units, bool Affordable, int Unblocks, int Fixes,
+                    List<string> Unlocks)> cmp = optimizeFor switch {
+            "cheapest" => (a, b) => a.Units.CompareTo(b.Units),
+            "unlock_bottleneck" => (a, b) => b.Fixes.CompareTo(a.Fixes) != 0
+                ? b.Fixes.CompareTo(a.Fixes) : a.Seconds.CompareTo(b.Seconds),
+            "progression" => (a, b) => b.Unblocks.CompareTo(a.Unblocks) != 0
+                ? b.Unblocks.CompareTo(a.Unblocks) : a.Seconds.CompareTo(b.Seconds),
+            _ => (a, b) => a.Seconds.CompareTo(b.Seconds)
+        };
+        cands.Sort((a, b) => {
+            int c = b.Affordable.CompareTo(a.Affordable);
+            if(c != 0) return c;
+            c = cmp(a, b);
+            return c != 0 ? c : string.CompareOrdinal(a.Name, b.Name);
+        });
+
+        (List<(string Name, double Seconds, double Units, bool Affordable, int Unblocks, int Fixes,
+               List<string> Unlocks)> page, bool truncated, int total) =
+            ToolResponse.Cap(cands, horizon, opts.Value.MaxItems);
+
+        return ToolResponse.Ok(new {
+            surface = surf,
+            data_age_seconds = rs.AgeSeconds,
+            optimize_for = optimizeFor,
+            queue_len = Json.Int(rs.Data, "queue_len"),
+            eta_assumes_all_labs = Json.Int(rs.Data, "active_labs") == 0 && Json.Int(rs.Data, "total_labs") > 0,
+            total_available = total,
+            truncated,
+            suggestions = page.Select(c => new {
+                name = c.Name,
+                cost_units = c.Units,
+                est_minutes = double.IsFinite(c.Seconds) ? ToolResponse.R(c.Seconds / 60, 1) : (double?)null,
+                all_packs_available = c.Affordable,
+                unlocks_recipes = c.Unlocks.Take(6).ToList(),
+                unblocks_technologies = c.Unblocks,
+                fixes_current_shortage = c.Fixes > 0 ? c.Fixes : (int?)null,
+                why = why(optimizeFor, c.Affordable, c.Fixes, c.Unblocks)
+            }).ToList()
+        });
+    }
+
+    private static string why(string mode, bool affordable, int fixes, int unblocks) {
+        if(!affordable) return "Pakete werden gerade nicht produziert — erst die Wissenschaft aufbauen";
+        return mode switch {
+            "cheapest" => "guenstigste verfuegbare Technologie",
+            "unlock_bottleneck" => fixes > 0
+                ? $"schaltet {fixes} Rezept(e) frei, die einen aktuell erkannten Engpass betreffen"
+                : "loest keinen der erkannten Engpaesse — nur nach Dauer sortiert",
+            "progression" => $"schaltet {unblocks} weitere Technologie(n) frei",
+            _ => "schnellste verfuegbare Technologie"
+        };
+    }
+
     /// <summary>
     /// Durchsatz je Paket und wer bremst. Verglichen wird produziert gegen
     /// verbraucht pro benoetigter Menge: ein Rezept mit 2 Paketen der Sorte A

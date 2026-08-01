@@ -21,6 +21,13 @@ Date: 2026-08-01
       count of destroyed player buildings — on a headless server with nobody connected the
       game's alert list is always empty.
     - The logistic collector now reports the largest stacks held in each network.
+    - Ore is reported as individual patches, not just as a sum per resource: centre, remaining
+      amount, depletion and the drills standing on it. A total of 600 million iron says nothing
+      if 90 percent of it sits in one patch with no drill on it. The patches are found by
+      flood-filling the chunks the rolling ore scan visits anyway.
+    - New collector "threat": evolution factor with its breakdown and the pollution balance,
+      both free. Counting nests means walking the whole map, so that part is a separate rolling
+      chunk scan behind fdash-threat-scan, off by default.
   Optimizations:
     - The full list of researched technologies is only sent when it actually changed. On large
       modpacks it is tens of kilobytes, and it changes once every few minutes at most.

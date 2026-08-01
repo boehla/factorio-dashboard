@@ -37,6 +37,10 @@ function config.fluid_scan() return bool("fdash-fluid-scan", true) end
 --- teuerste Collector des Mods (ein Inventar-Read je Kiste).
 function config.container_scan() return bool("fdash-container-scan", false) end
 
+--- Nester zaehlen heisst die ganze Karte abgehen. Der Rest des Threat-Jobs
+--- (Evolution, Pollution) laeuft auch ohne.
+function config.threat_scan() return bool("fdash-threat-scan", false) end
+
 function config.covered_refresh_ticks()
   return int("fdash-covered-refresh-minutes", 10) * 60 * 60
 end

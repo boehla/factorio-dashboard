@@ -33,6 +33,7 @@ local JOBS = {
   require("scripts.jobs.fluids"),
   require("scripts.jobs.containers"),
   require("scripts.jobs.alerts"),
+  require("scripts.jobs.threat"),
 }
 
 scheduler.JOBS = JOBS

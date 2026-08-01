@@ -87,5 +87,14 @@ data:extend({
     setting_type = "runtime-global",
     default_value = false,
     order = "e-b"
+  },
+  -- Nester zaehlen heisst die ganze Karte abgehen. Evolution und
+  -- Pollution-Bilanz gibt es auch ohne, deshalb per Default aus.
+  {
+    type = "bool-setting",
+    name = "fdash-threat-scan",
+    setting_type = "runtime-global",
+    default_value = false,
+    order = "e-c"
   }
 })

@@ -397,6 +397,63 @@ try {
         recipes.Build("copper-plate", 3, false, true,
             RecipeQuery.StateFrom(prodPayload, asmPayload), RecipeQuery.MachinesFrom(asmPayload))
         .Children.Any(c => c.Item == "copper-ore" && c.IsLeaf && !c.DepthLimited));
+
+    // ----------------------------------------------------------------------
+    // 13) ChainDiagnoser: die erste klemmende Stufe, nicht irgendeine. Der Fall
+    //     ist der haeufigste echte: das Endprodukt hungert, die Stufe darunter
+    //     staut am Ausgang — die Ursache liegt also NICHT bei der Zutat, die
+    //     fehlt, sondern beim Nebenprodukt, das niemand abnimmt.
+    // ----------------------------------------------------------------------
+    JsonElement chainProd = JsonSerializer.SerializeToElement(new { items = new[] {
+        new { item = "circuit", produced_per_min = 10.0, consumed_per_min = 60.0 },
+        new { item = "copper-cable", produced_per_min = 5.0, consumed_per_min = 30.0 },
+        new { item = "copper-plate", produced_per_min = 200.0, consumed_per_min = 5.0 } } });
+    JsonElement chainAsm = JsonSerializer.SerializeToElement(new { by_item = new Dictionary<string, object> {
+        ["circuit"] = new { total = 4, avg_speed = 1.0,
+            status = new Dictionary<string, int> { ["no_ingredients"] = 4 },
+            recipes = new Dictionary<string, int> { ["circuit"] = 4 } },
+        ["copper-cable"] = new { total = 2, avg_speed = 1.0,
+            status = new Dictionary<string, int> { ["full_output"] = 2 },
+            recipes = new Dictionary<string, int> { ["copper-cable"] = 2 } },
+        ["copper-plate"] = new { total = 8, avg_speed = 1.0,
+            status = new Dictionary<string, int> { ["working"] = 8 },
+            recipes = new Dictionary<string, int> { ["copper-plate"] = 8 } } } });
+
+    ChainDiagnosis diag = new ChainDiagnoser(protoExporter)
+        .Diagnose("circuit", 60, 5, chainProd, chainAsm);
+    Check("chain: finds the blocked stage, not the hungry one",
+        diag.RootCause != null && diag.RootCause.Item == "copper-cable"
+        && diag.RootCause.Reason == "full_output");
+    Check("chain: explains itself in words",
+        diag.Detail.Contains("copper-cable") && diag.SuggestedAction.Length > 0);
+    Check("chain: required rate propagates through the recipe",
+        diag.Chain.Any(s => s.Item == "copper-cable" && Math.Abs(s.RequiredPerMin - 180) < 0.1));
+    Check("chain: a healthy stage is not reported",
+        diag.Chain.All(s => s.Item != "copper-plate" || s.Ok));
+
+    ChainDiagnosis fine = new ChainDiagnoser(protoExporter)
+        .Diagnose("copper-plate", 10, 3, chainProd, chainAsm);
+    Check("chain: nothing wrong stays nothing wrong", fine.RootCause == null);
+
+    // ----------------------------------------------------------------------
+    // 14) ProductionPlanner: Maschinenzahl und der limitierende Schritt.
+    //     circuit braucht 0.5 s je Craft -> 120 Crafts/min je Maschine.
+    //     60/min Ziel = 0.5 Maschinen; copper-cable: 3 je circuit = 180/min,
+    //     Rezept liefert 2 Stueck in 0.5 s -> 240/min je Maschine = 0.75.
+    // ----------------------------------------------------------------------
+    ProductionPlan plan = new ProductionPlanner(protoExporter)
+        .Plan("circuit", 60, 3, chainProd, chainAsm);
+    PlanStep? circuitStep = plan.Steps.FirstOrDefault(s => s.Item == "circuit");
+    PlanStep? cableStep = plan.Steps.FirstOrDefault(s => s.Item == "copper-cable");
+    Check("plan: machine count uses recipe time and measured speed",
+        circuitStep != null && Math.Abs(circuitStep.MachinesNeeded - 0.5) < 0.05);
+    Check("plan: ingredient rate accounts for output count",
+        cableStep != null && Math.Abs(cableStep.RequiredPerMin - 180) < 0.1
+        && Math.Abs(cableStep.MachinesNeeded - 0.75) < 0.05);
+    Check("plan: limiting step is the worst covered one",
+        plan.LimitingStep != null && plan.LimitingStep.Item == "copper-cable");
+    Check("plan: productivity flag is carried through",
+        circuitStep != null && circuitStep.AllowProductivity);
 } finally {
     try { Directory.Delete(protoDir, true); } catch { }
 }

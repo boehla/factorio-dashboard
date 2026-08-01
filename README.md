@@ -169,6 +169,11 @@ collector has already filled — no RCON round trip, no tick spent per question.
 | `get_train_report` | Trains by state with how long they have been stuck, and stations against their train limit. |
 | `get_logistic_and_storage` | Robot networks and what is actually stored, in the network and (optionally) in chests. |
 | `get_history` | A metric over time as buckets with min/max and a trend, not a raw point cloud. |
+| `diagnose_item_chain` | Walks the chain upstream and names the first stage that actually stops — with numbers and what to do. |
+| `plan_production` | How many machines per step for a target rate, using the measured crafting speed, and which step is the limit. |
+| `suggest_next_research` | Ranked research options — fastest, cheapest, unblocks the most, or fixes a current shortage. |
+| `get_resource_patches` | Ore patch by patch: centre, remaining, depletion, drills — the answer to "when do I need a new outpost". |
+| `get_pollution_and_threat` | Evolution with its breakdown, pollution produced against absorbed, buildings lost. |
 | `get_snapshot` | Raw job payload — the escape hatch for anything without its own tool. |
 
 Two rules shape every answer: lists are capped and say so (`truncated`, `total_available`), and

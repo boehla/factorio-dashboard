@@ -171,4 +171,30 @@ function util.surface_key(job_name, surface_name)
   return job_name .. "@" .. surface_name
 end
 
+-- ---------------------------------------------------------- Chunk-Schluessel
+--
+-- Chunk-Koordinaten als eine Zahl. Ein String-Schluessel ("12:-7") waere
+-- lesbarer, aber diese Tabellen haben auf einer grossen Karte zehntausende
+-- Eintraege und landen in `storage` — jeder String dort kostet beim Speichern.
+-- Der Offset faengt negative Koordinaten ab; ±32768 Chunks sind ±1 Mio. Kacheln
+-- und damit weit jenseits jeder real bespielten Karte.
+
+local CHUNK_OFFSET = 32768
+local CHUNK_SPAN = 65536
+
+function util.chunk_key(cx, cy)
+  return (cx + CHUNK_OFFSET) * CHUNK_SPAN + (cy + CHUNK_OFFSET)
+end
+
+function util.chunk_xy(key)
+  local cx = math.floor(key / CHUNK_SPAN) - CHUNK_OFFSET
+  local cy = key % CHUNK_SPAN - CHUNK_OFFSET
+  return cx, cy
+end
+
+--- Chunk-Schluessel zu einer Weltposition.
+function util.chunk_key_at(x, y)
+  return util.chunk_key(math.floor(x / 32), math.floor(y / 32))
+end
+
 return util
