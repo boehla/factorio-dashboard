@@ -1,4 +1,20 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.2.0
+Date: 2026-08-01
+  Features:
+    - The research export now reports the running research as well: name, level, progress,
+      units done and remaining, science packs and an estimated time from the measured lab rate.
+    - Reports the research queue, how many technologies are researched in total, and the
+      technologies that are exactly one prerequisite away from being researchable.
+    - The one-shot prototype export now includes technologies: prerequisites, cost, science
+      packs, maximum level and the recipes each one unlocks.
+    - Recipes carry allow_productivity and the raw product probability, so a throughput
+      estimate can tell an expected value from a guaranteed one.
+  Optimizations:
+    - The full list of researched technologies is only sent when it actually changed. On large
+      modpacks it is tens of kilobytes, and it changes once every few minutes at most.
+
+---------------------------------------------------------------------------------------------------
 Version: 0.1.0
 Date: 2026-07-31
   Features:

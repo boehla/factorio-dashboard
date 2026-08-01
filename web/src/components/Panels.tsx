@@ -230,9 +230,29 @@ export function RobotsPanel({ data }: { data: any }) {
   );
 }
 
-export function ResearchPanel({ audit, enabled, onToggle }:
-  { audit: any[]; enabled: boolean; onToggle: (v: boolean) => void }) {
+// Durchsatz der Wissenschaftspakete der laufenden Forschung. Das Pack mit der
+// geringsten Produktion je benoetigter Menge deckelt die SPM — das ist die
+// Antwort auf "warum forscht das so langsam", und im Spiel steht sie nirgends.
+function limitingPack(state: any, production: any): string | null {
+  const packs = (state?.current?.packs ?? []) as { name: string; count: number }[];
+  if(packs.length < 2) return null;
+  const rate = new Map<string, number>();
+  for(const it of (production?.items ?? []) as any[]) rate.set(it.item, it.produced_per_min ?? 0);
+  let worst: string | null = null, worstVal = Infinity;
+  for(const p of packs) {
+    const v = (rate.get(p.name) ?? 0) / Math.max(1, p.count);
+    if(v < worstVal) { worstVal = v; worst = p.name; }
+  }
+  return worst;
+}
+
+export function ResearchPanel({ audit, enabled, onToggle, state, production }:
+  { audit: any[]; enabled: boolean; onToggle: (v: boolean) => void; state?: any; production?: any }) {
   const last = audit?.[audit.length - 1];
+  const cur = state?.current;
+  const limiting = limitingPack(state, production);
+  const labs = state ? `${state.active_labs ?? 0}/${state.total_labs ?? 0} Labore` : null;
+
   return (
     <Panel title="Research" right={
       <button onClick={() => onToggle(!enabled)}
@@ -240,12 +260,41 @@ export function ResearchPanel({ audit, enabled, onToggle }:
         auto: {enabled ? "ON" : "OFF"}
       </button>
     }>
-      {last ? (
+      {cur ? (
         <>
-          <div className="text-sm font-medium">{last.tech}</div>
-          <div className="text-xs text-gray-400">~{duration(last.estimatedSeconds)} · {last.result}</div>
+          <div className="text-sm font-medium truncate" title={cur.name}>{cur.name}</div>
+          <Bar pct={cur.progress ?? 0} color="#60a5fa" />
+          <div className="flex justify-between text-xs text-gray-400">
+            <span>{cur.units_done ?? 0}/{cur.units_total ?? 0}</span>
+            <span>{cur.eta_seconds != null ? duration(cur.eta_seconds) : "—"}</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1 text-xs">
+            {(cur.packs ?? []).map((p: any) => (
+              <span key={p.name}
+                className={p.name === limiting ? "text-crit" : "text-gray-400"}
+                title={p.name === limiting
+                  ? `${p.name} — geringster Durchsatz, deckelt die Forschung`
+                  : p.name}>
+                <ItemIcon name={p.name} size={14} />{p.count > 1 ? `×${p.count}` : ""}
+              </span>
+            ))}
+            {labs && <span className="ml-auto text-gray-500">{labs}</span>}
+          </div>
         </>
-      ) : <span className="text-gray-500 text-sm">keine Auswahl</span>}
+      ) : state ? (
+        <>
+          <span className="text-warn text-sm">keine Forschung aktiv</span>
+          <div className="text-xs text-gray-400">
+            {state.researchable_now ?? (state.candidates?.length ?? 0)} forschbar · {labs}
+          </div>
+        </>
+      ) : <span className="text-gray-500 text-sm">—</span>}
+
+      {last && (
+        <div className="text-xs text-gray-600 truncate" title={`${last.tech} · ${last.result}`}>
+          Vorschlag: {last.tech} (~{duration(last.estimatedSeconds)})
+        </div>
+      )}
     </Panel>
   );
 }

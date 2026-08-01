@@ -23,13 +23,16 @@ local BLOCK = 400          -- Eintraege pro Serialisierungs-Block
 
 --- Zutaten/Produkte als kompakte {n=name, t=type, a=amount}-Liste.
 --- amount beruecksichtigt probability (Erwartungswert), damit sich /min exakt
---- aus energy + crafting_speed berechnen laesst.
+--- aus energy + crafting_speed berechnen laesst. Die rohe Wahrscheinlichkeit
+--- steht zusaetzlich in `p`: fuer eine Durchsatzrechnung ist der Erwartungswert
+--- richtig, fuer die Frage "kommt das ueberhaupt sicher heraus" nicht.
 local function io_list(list)
   local r = {}
   for _, e in pairs(list or {}) do
     local amt = e.amount or 1
-    if e.probability then amt = amt * e.probability end
-    r[#r + 1] = { n = e.name, t = e.type, a = amt }
+    local prob = e.probability
+    if prob then amt = amt * prob end
+    r[#r + 1] = { n = e.name, t = e.type, a = amt, p = (prob and prob < 1) and prob or nil }
   end
   return r
 end
@@ -67,12 +70,61 @@ local PHASES = {
       if not ok or type(energy) ~= "number" or energy <= 0 then
         ok, energy = pcall(function() return proto.energy_required end)
       end
+      -- allow_productivity entscheidet, ob sich ein Schritt ueber Module
+      -- ueberhaupt beschleunigen laesst — bei Pyanodons die erste Frage, wenn
+      -- eine Stufe zu langsam ist.
+      local okp, prod_allowed = pcall(function() return proto.allow_productivity end)
       return {
         order = proto.order,
         category = proto.category,
         e = (ok and type(energy) == "number" and energy > 0) and energy or 0.5,
+        prodmod = (okp and prod_allowed) and true or nil,
         ing = io_list(proto.ingredients),
         prod = io_list(proto.products)
+      }
+    end
+  },
+  {
+    key = "technologies",
+    names = function()
+      local n = {}
+      for name, _ in pairs(prototypes.technology) do n[#n + 1] = name end
+      table.sort(n)
+      return n
+    end,
+    -- Was eine Technologie kostet und was sie freischaltet. Der Laufzeit-Job
+    -- research_state meldet nur, was gerade forschbar ist; ob sich das lohnt,
+    -- steht hier. Prototypdaten, also einmalig und zur Laufzeit gratis.
+    entry = function(name)
+      local proto = prototypes.technology[name]
+      if not proto then return nil end
+
+      local pre = {}
+      for pname, _ in pairs(proto.prerequisites or {}) do pre[#pre + 1] = pname end
+      table.sort(pre)
+
+      local unlocks = {}
+      for _, effect in pairs(proto.effects or {}) do
+        if effect.type == "unlock-recipe" and effect.recipe then
+          unlocks[#unlocks + 1] = effect.recipe
+        end
+      end
+
+      local packs = {}
+      local unit = proto.research_unit_ingredients
+      for _, ing in pairs(unit or {}) do
+        packs[#packs + 1] = { n = ing.name, a = ing.amount }
+      end
+
+      return {
+        order = proto.order,
+        pre = (#pre > 0) and pre or nil,
+        unlocks = (#unlocks > 0) and unlocks or nil,
+        count = proto.research_unit_count,
+        e = proto.research_unit_energy,
+        packs = (#packs > 0) and packs or nil,
+        max_level = proto.max_level,
+        upgrade = proto.upgrade or nil
       }
     end
   },

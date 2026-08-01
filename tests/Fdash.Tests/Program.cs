@@ -324,6 +324,83 @@ Check("token budget: problem list stays within MaxResponseChars",
 Check("token budget: every answer carries its age",
     problemAnswer.Contains("data_age_seconds") && machineAnswer.Contains("data_age_seconds"));
 
+// --------------------------------------------------------------------------
+// 12) Prototyp-Export und Rezeptbaum. Der Export wird aus einer echten Datei
+//     gelesen, weil genau dort die Fallen liegen: unendliche Technologien
+//     melden max_level = 4294967295, was in kein int passt und frueher den
+//     ganzen Collector in seinen Backoff getrieben hat.
+// --------------------------------------------------------------------------
+string protoDir = Path.Combine(Path.GetTempPath(), "fdash-proto-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(Path.Combine(protoDir, "fdash"));
+try {
+    File.WriteAllText(Path.Combine(protoDir, "fdash", "prototypes.json"), """
+    {
+      "recipes": {
+        "circuit":      { "category": "crafting", "e": 0.5, "prodmod": true,
+                          "ing": [{"n":"copper-cable","t":"item","a":3},{"n":"iron-plate","t":"item","a":1}],
+                          "prod": [{"n":"circuit","t":"item","a":1}] },
+        "copper-cable": { "e": 0.5, "ing": [{"n":"copper-plate","t":"item","a":1}],
+                          "prod": [{"n":"copper-cable","t":"item","a":2}] },
+        "copper-plate": { "e": 3.2, "ing": [{"n":"copper-ore","t":"item","a":1}],
+                          "prod": [{"n":"copper-plate","t":"item","a":1}] },
+        "scrap-back":   { "e": 1, "ing": [{"n":"circuit","t":"item","a":1}],
+                          "prod": [{"n":"copper-cable","t":"item","a":1,"p":0.25}] }
+      },
+      "resources": { "copper-ore": { "infinite": false, "mining_time": 1, "product": "copper-ore" } },
+      "technologies": {
+        "electronics":     { "count": 100, "e": 15, "unlocks": ["circuit","copper-cable"],
+                             "pre": ["automation"], "max_level": 1 },
+        "mining-prod":     { "count": 500, "e": 60, "max_level": 4294967295, "upgrade": true }
+      },
+      "fluid_names": { "water": true },
+      "entities": {}, "icon_stems": {}
+    }
+    """);
+
+    PrototypeExporter protoExporter = new PrototypeExporter(
+        Options.Create(new CollectorOptions { ScriptOutputPath = protoDir }),
+        NullLogger<PrototypeExporter>.Instance);
+    Check("prototypes: file loads", await protoExporter.TryLoadAsync(default));
+    Check("prototypes: recipes parsed", protoExporter.Recipes.Count == 4);
+    Check("prototypes: productivity flag survives",
+        protoExporter.Recipes["circuit"].AllowProductivity && !protoExporter.Recipes["copper-cable"].AllowProductivity);
+    Check("prototypes: technologies parsed", protoExporter.Technologies.Count == 2);
+    Check("prototypes: infinite tech does not overflow max_level",
+        protoExporter.Technologies["mining-prod"].MaxLevel == null && protoExporter.Technologies["electronics"].MaxLevel == 1);
+    Check("prototypes: unlock index is inverted",
+        protoExporter.UnlockedBy["circuit"].Contains("electronics"));
+
+    RecipeQuery recipes = new RecipeQuery(protoExporter);
+    Check("recipes: producer lookup", recipes.ProducedBy("circuit").Contains("circuit"));
+    Check("recipes: consumer lookup", recipes.ConsumedBy("copper-cable").Contains("circuit"));
+
+    JsonElement prodPayload = JsonSerializer.SerializeToElement(new { items = new[] {
+        new { item = "circuit", produced_per_min = 30.0, consumed_per_min = 10.0 },
+        new { item = "copper-cable", produced_per_min = 90.0, consumed_per_min = 90.0 } } });
+    JsonElement asmPayload = JsonSerializer.SerializeToElement(new { by_item = new Dictionary<string, object> {
+        ["circuit"] = new { total = 4, avg_speed = 1.25, recipes = new Dictionary<string, int> { ["circuit"] = 4 } } } });
+
+    RecipeNode chainTree = recipes.Build("circuit", 3, false, true,
+        RecipeQuery.StateFrom(prodPayload, asmPayload), RecipeQuery.MachinesFrom(asmPayload));
+    Check("recipes: live rate is attached", Math.Abs(chainTree.State.ProducedPerMin - 30) < 0.001 && chainTree.State.Machines == 4);
+    Check("recipes: the built recipe comes first", chainTree.Recipes[0].MachinesRunningIt == 4);
+    Check("recipes: chain descends to the ore",
+        chainTree.Children.Any(c => c.Item == "copper-cable" && c.Children.Any(g => g.Item == "copper-plate")));
+    Check("recipes: recycling cycle terminates", chainTree.Children.Count > 0);
+
+    RecipeNode shallow = recipes.Build("circuit", 1, false, true,
+        RecipeQuery.StateFrom(prodPayload, asmPayload), RecipeQuery.MachinesFrom(asmPayload));
+    Check("recipes: depth limit is distinguishable from a real leaf",
+        shallow.Children.All(c => c.DepthLimited || c.IsLeaf)
+        && shallow.Children.Any(c => c.Item == "copper-cable" && c.DepthLimited && !c.IsLeaf));
+    Check("recipes: ore is a real leaf, not a depth limit",
+        recipes.Build("copper-plate", 3, false, true,
+            RecipeQuery.StateFrom(prodPayload, asmPayload), RecipeQuery.MachinesFrom(asmPayload))
+        .Children.Any(c => c.Item == "copper-ore" && c.IsLeaf && !c.DepthLimited));
+} finally {
+    try { Directory.Delete(protoDir, true); } catch { }
+}
+
 Console.WriteLine($"\n{(failures == 0 ? "ALL PASSED" : failures + " FAILED")}");
 return failures;
 

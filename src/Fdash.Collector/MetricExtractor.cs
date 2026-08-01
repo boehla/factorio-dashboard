@@ -36,6 +36,15 @@ public static class MetricExtractor {
             outp.Add(new Sample(saveId, "power.production", labels, ts, num(n, "production")));
             outp.Add(new Sample(saveId, "power.consumption", labels, ts, num(n, "consumption")));
             outp.Add(new Sample(saveId, "power.satisfaction", labels, ts, num(n, "satisfaction")));
+            // Der Akkustand ist der Fruehindikator: die Satisfaction kann noch
+            // 1.0 sein, waehrend die Puffer seit Stunden leerer werden.
+            if(n.TryGetProperty("accumulators", out JsonElement acc) && acc.ValueKind == JsonValueKind.Object) {
+                double capacity = num(acc, "capacity");
+                if(capacity > 0) {
+                    outp.Add(new Sample(saveId, "power.accumulator_charge", labels, ts,
+                        num(acc, "energy") / capacity));
+                }
+            }
         }
     }
 

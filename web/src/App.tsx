@@ -90,7 +90,8 @@ export default function App() {
         <>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <PowerPanel data={snaps.power} />
-            <ResearchPanel audit={audit} enabled={autoResearch} onToggle={toggleResearch} />
+            <ResearchPanel audit={audit} enabled={autoResearch} onToggle={toggleResearch}
+              state={snaps[`research_state@${planet}`] ?? snaps.research_state} production={production} />
             <AlertsPanel trains={snaps.trains_derived ?? snaps.trains} stall={snaps.stall} power={snaps.power} />
             <RobotsPanel data={snaps.logistics} />
           </div>

@@ -19,6 +19,9 @@ public sealed class PrototypeExporter {
 
     public bool Loaded { get; private set; }
 
+    /// <summary>Einmal kaputt gelesen — nicht bei jedem Poll erneut versuchen.</summary>
+    private bool failed;
+
     public IReadOnlyDictionary<string, ResourceProto> Resources { get; private set; }
         = new Dictionary<string, ResourceProto>();
     public IReadOnlyDictionary<string, RecipeProto> Recipes { get; private set; }
@@ -27,6 +30,13 @@ public sealed class PrototypeExporter {
     public IReadOnlyDictionary<string, string> IconStems { get; private set; }
         = new Dictionary<string, string>();
     public IReadOnlyList<string> FluidNames { get; private set; } = Array.Empty<string>();
+    public IReadOnlyDictionary<string, TechProto> Technologies { get; private set; }
+        = new Dictionary<string, TechProto>();
+
+    /// <summary>Rezeptname -&gt; Technologien, die es freischalten. Aus den Effekten
+    /// invertiert; beantwortet "welche Forschung loest diesen Engpass".</summary>
+    public IReadOnlyDictionary<string, List<string>> UnlockedBy { get; private set; }
+        = new Dictionary<string, List<string>>();
 
     public PrototypeExporter(IOptions<CollectorOptions> options, ILogger<PrototypeExporter> log) {
         this.options = options.Value;
@@ -48,6 +58,7 @@ public sealed class PrototypeExporter {
     /// </summary>
     public async Task<bool> TryLoadAsync(CancellationToken ct) {
         if(Loaded) return true;
+        if(failed) return false;
         string? p = path;
         if(p == null) {
             log.LogWarning("Collector:ScriptOutputPath is not set — prototype data (recipe graph, ore metadata) stays empty.");
@@ -68,6 +79,18 @@ public sealed class PrototypeExporter {
             // Wird gerade geschrieben (der Mod haengt blockweise an) — spaeter erneut.
             return false;
         } catch(IOException) {
+            return false;
+        } catch(Exception ex) {
+            // Alles andere ist ein Fehler in der Datei selbst, nicht ein
+            // Zeitproblem. Die Datei ist pro Save konstant: erneut zu versuchen
+            // liefert dasselbe Ergebnis und flutet nur das Log (und trieb den
+            // Collector vorher in seinen Backoff, weil der Fehler bis dorthin
+            // durchschlug).
+            if(!failed) {
+                failed = true;
+                log.LogError(ex, "prototypes.json could not be read — recipe graph and technologies "
+                    + "stay empty. Re-export with remote.call('fdash','export_prototypes') after fixing.");
+            }
             return false;
         }
     }
@@ -100,6 +123,9 @@ public sealed class PrototypeExporter {
                     Name = p.Name,
                     EnergyRequired = p.Value.TryGetProperty("e", out JsonElement er) && er.ValueKind == JsonValueKind.Number
                         ? er.GetDouble() : 0.5,
+                    Category = p.Value.TryGetProperty("category", out JsonElement cat) && cat.ValueKind == JsonValueKind.String
+                        ? cat.GetString() : null,
+                    AllowProductivity = p.Value.TryGetProperty("prodmod", out JsonElement pm) && pm.ValueKind == JsonValueKind.True,
                     Ingredients = parseIo(p.Value, "ing"),
                     Products = parseIo(p.Value, "prod")
                 };
@@ -122,8 +148,55 @@ public sealed class PrototypeExporter {
         }
         FluidNames = fluidNames;
 
-        log.LogInformation("Loaded {Res} resources, {Rec} recipes, {Stem} icon stems, {Fluid} fluids.",
-            res.Count, recipes.Count, stems.Count, fluidNames.Count);
+        // Technologien gibt es erst ab Mod 0.2.0; aeltere Exporte lassen den
+        // Block weg, alles andere funktioniert unveraendert weiter.
+        Dictionary<string, TechProto> techs = new();
+        Dictionary<string, List<string>> unlockedBy = new(StringComparer.Ordinal);
+        if(root.TryGetProperty("technologies", out JsonElement tc) && tc.ValueKind == JsonValueKind.Object) {
+            foreach(JsonProperty p in tc.EnumerateObject()) {
+                TechProto tech = new TechProto {
+                    Name = p.Name,
+                    Prerequisites = strList(p.Value, "pre"),
+                    UnlockedRecipes = strList(p.Value, "unlocks"),
+                    UnitCount = p.Value.TryGetProperty("count", out JsonElement uc) && uc.ValueKind == JsonValueKind.Number
+                        ? uc.GetDouble() : 0,
+                    UnitEnergy = p.Value.TryGetProperty("e", out JsonElement ue) && ue.ValueKind == JsonValueKind.Number
+                        ? ue.GetDouble() : 0,
+                    Packs = parseIo(p.Value, "packs"),
+                    // Unendliche Technologien melden max_level = 4294967295 —
+                    // das passt in kein int und bedeutet ohnehin "kein Limit".
+                    MaxLevel = p.Value.TryGetProperty("max_level", out JsonElement ml) && ml.ValueKind == JsonValueKind.Number
+                        && ml.GetDouble() is double lvl && lvl < int.MaxValue ? (int)lvl : null,
+                    Upgrade = p.Value.TryGetProperty("upgrade", out JsonElement up) && up.ValueKind == JsonValueKind.True
+                };
+                techs[p.Name] = tech;
+                // Umgekehrter Index: "welche Forschung schaltet dieses Rezept frei"
+                // ist die Frage, die bei einem Engpass wirklich gestellt wird.
+                foreach(string recipe in tech.UnlockedRecipes) {
+                    if(!unlockedBy.TryGetValue(recipe, out List<string>? list)) {
+                        list = new List<string>();
+                        unlockedBy[recipe] = list;
+                    }
+                    list.Add(p.Name);
+                }
+            }
+        }
+        Technologies = techs;
+        UnlockedBy = unlockedBy;
+
+        log.LogInformation("Loaded {Res} resources, {Rec} recipes, {Tech} technologies, {Stem} icon stems, {Fluid} fluids.",
+            res.Count, recipes.Count, techs.Count, stems.Count, fluidNames.Count);
+    }
+
+    private static List<string> strList(JsonElement e, string prop) {
+        List<string> list = new();
+        if(e.TryGetProperty(prop, out JsonElement arr) && arr.ValueKind == JsonValueKind.Array) {
+            foreach(JsonElement item in arr.EnumerateArray()) {
+                string? s = item.GetString();
+                if(!string.IsNullOrEmpty(s)) list.Add(s);
+            }
+        }
+        return list;
     }
 
     /// <summary>Kompakte {n=name, t=type, a=amount}-Liste aus einem Rezept-Eintrag.</summary>

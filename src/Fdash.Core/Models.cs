@@ -105,8 +105,27 @@ public sealed record RecipeIo {
 public sealed record RecipeProto {
     public string Name { get; init; } = "";
     public double EnergyRequired { get; init; } = 0.5;  // crafting time in seconds @ speed 1
+    public string? Category { get; init; }
+    /// <summary>Ob Produktivitaetsmodule erlaubt sind — bei einer zu langsamen Stufe die erste Frage.</summary>
+    public bool AllowProductivity { get; init; }
     public List<RecipeIo> Ingredients { get; init; } = new();
     public List<RecipeIo> Products { get; init; } = new();
+}
+
+/// <summary>
+/// Eine Technologie aus dem Prototyp-Export (Mod 0.2.0). Statisch pro Save,
+/// deshalb einmalig geladen — anders als der Laufzeit-Job research_state, der
+/// nur sagt, was gerade forschbar ist.
+/// </summary>
+public sealed record TechProto {
+    public string Name { get; init; } = "";
+    public List<string> Prerequisites { get; init; } = new();
+    public List<string> UnlockedRecipes { get; init; } = new();
+    public double UnitCount { get; init; }
+    public double UnitEnergy { get; init; }
+    public List<RecipeIo> Packs { get; init; } = new();
+    public int? MaxLevel { get; init; }
+    public bool Upgrade { get; init; }
 }
 
 // --- Produktion / Stall (§3.8) ---
