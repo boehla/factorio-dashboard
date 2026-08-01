@@ -134,6 +134,14 @@ export function AlertsPanel({ trains, stall, power }: { trains: any; stall: any;
                 return (
                   <div key={p.id} className="text-xs text-gray-300 truncate">
                     <span className="opacity-50">#{p.id}</span>
+                    {/* Dauer kommt aus dem abgeleiteten Job trains_derived; der
+                        rohe trains-Job kennt sie nicht. "haengt seit 14 min" ist
+                        etwas anderes als "haengt gerade". */}
+                    {p.stuck_seconds > 0 && (
+                      <span className="opacity-60" title="Dauer im Problemzustand">
+                        {" "}{duration(p.stuck_seconds)}
+                      </span>
+                    )}
                     {p.schedule_station
                       ? <> → <RichText text={p.schedule_station} size={14} /></>
                       : null}

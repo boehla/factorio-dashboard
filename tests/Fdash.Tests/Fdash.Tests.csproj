@@ -3,5 +3,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Fdash.Rcon\Fdash.Rcon.csproj" />
     <ProjectReference Include="..\..\src\Fdash.Collector\Fdash.Collector.csproj" />
+    <ProjectReference Include="..\..\src\Fdash.Analysis\Fdash.Analysis.csproj" />
+    <!-- Die MCP-Tools liegen in der Api; der Token-Budget-Test prueft die echten
+         Antworten, nicht eine Nachbildung davon. -->
+    <ProjectReference Include="..\..\src\Fdash.Api\Fdash.Api.csproj" />
   </ItemGroup>
 </Project>

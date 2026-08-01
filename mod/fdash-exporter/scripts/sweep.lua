@@ -78,8 +78,13 @@ function sweep.chunks(st, si, budget, fn)
   while spent < budget do
     if st.i >= list.n then return spent, true end
     st.i = st.i + 1
-    fn(surface, chunks.area(list, st.i))
+    -- Wie bei sweep.registry darf der Callback Zusatzkosten melden. Ein Chunk
+    -- ist eben nicht wie der andere: ein leerer kostet nichts, ein voll mit Erz
+    -- belegter liefert ueber tausend Entities. Ohne diese Rueckmeldung waere
+    -- das Budget in Chunks gezaehlt und die tatsaechliche Arbeit unbegrenzt.
+    local extra = fn(surface, chunks.area(list, st.i))
     spent = spent + 1
+    if type(extra) == "number" and extra > 0 then spent = spent + extra end
   end
   return spent, false
 end

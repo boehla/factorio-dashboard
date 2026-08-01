@@ -5,9 +5,14 @@ import {
   MachinesPanel, ResourcesPanel, ProductionPanel
 } from "./components/Panels";
 import { ShortagesPanel } from "./components/ShortagesPanel";
+import { ProblemsPanel } from "./components/ProblemsPanel";
+import { PlatformsPanel } from "./components/PlatformsPanel";
 import { ProducingItemsGraph } from "./components/ProducingItemsGraph";
 
 const PLANETS = ["nauvis", "vulcanus", "fulgora", "gleba", "aquilo"];
+// Plattformen haengen an keiner Oberflaeche, teilen sich aber die Auswahlleiste
+// mit den Planeten — deshalb hier als Pseudo-Planet gefuehrt.
+const PLATFORMS = "platforms";
 
 export default function App() {
   const { snaps, connected } = useSnapshots();
@@ -69,19 +74,30 @@ export default function App() {
             {p}
           </button>
         ))}
-        {view === "dashboard" && <button className="px-3 py-1 rounded text-sm bg-panel">Platforms</button>}
+        {view === "dashboard" && (
+          <button onClick={() => setPlanet(PLATFORMS)}
+            className={`px-3 py-1 rounded text-sm ${planet === PLATFORMS ? "bg-panelborder" : "bg-panel"}`}>
+            Platforms
+          </button>
+        )}
       </nav>
 
       {isGraph ? (
         <ProducingItemsGraph planet={planet} production={production} assemblers={assemblers} />
+      ) : planet === PLATFORMS ? (
+        <PlatformsPanel data={snaps.platforms} />
       ) : (
         <>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
             <PowerPanel data={snaps.power} />
             <ResearchPanel audit={audit} enabled={autoResearch} onToggle={toggleResearch} />
-            <AlertsPanel trains={snaps.trains} stall={snaps.stall} power={snaps.power} />
+            <AlertsPanel trains={snaps.trains_derived ?? snaps.trains} stall={snaps.stall} power={snaps.power} />
             <RobotsPanel data={snaps.logistics} />
           </div>
+
+          {/* Serverseitige Rangliste ueber alle Domaenen — steht bewusst ueber
+              den Engpaessen: die sind nur eine ihrer Quellen. */}
+          <ProblemsPanel data={snaps.problems} />
 
           <ShortagesPanel assemblers={assemblers} />
 
@@ -96,7 +112,8 @@ export default function App() {
 
       {!isGraph && (
         <footer className="text-xs text-gray-600 text-center mt-2">
-          Datenerfassung über den Mod fdash-exporter · Planet: {planet}
+          Datenerfassung über den Mod fdash-exporter
+          {planet === PLATFORMS ? " · Plattformen" : ` · Planet: ${planet}`}
         </footer>
       )}
     </div>

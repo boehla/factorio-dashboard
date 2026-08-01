@@ -8,6 +8,23 @@ using Microsoft.Extensions.Options;
 namespace Fdash.Collector;
 
 /// <summary>
+/// Abgeleitete Auswertungen, die nach jedem Snapshot laufen und ihr Ergebnis
+/// selbst auf dem Bus veroeffentlichen (stall macht das seit jeher direkt hier).
+///
+/// Der Collector kennt die Analyse-Schicht bewusst nicht: Fdash.Analysis
+/// referenziert Fdash.Collector, umgekehrt waere das ein Zirkel. Deshalb dieser
+/// schmale Haken — die Api haengt die Implementierung ein.
+/// </summary>
+public interface IDerivedJob {
+    /// <summary>
+    /// Wird nach dem Verteilen aller Mod-Jobs aufgerufen. Der Bus ist zu diesem
+    /// Zeitpunkt bereits aktuell, abgeleitete Jobs koennen also aufeinander
+    /// aufbauen — die Reihenfolge in der DI-Registrierung entscheidet.
+    /// </summary>
+    Task RunAsync(ModSnapshot snapshot, string saveId, long ts, CancellationToken ct);
+}
+
+/// <summary>
 /// Holt Snapshots vom Mod und verteilt sie an Bus, Zeitreihe und die
 /// abgeleiteten Auswertungen.
 ///
@@ -29,6 +46,7 @@ public sealed class CollectorService : BackgroundService {
     private readonly ISnapshotBus bus;
     private readonly StallDetector stallDetector;
     private readonly AutoResearchService autoResearch;
+    private readonly IEnumerable<IDerivedJob> derived;
     private readonly CollectorOptions options;
     private readonly ILogger<CollectorService> log;
 
@@ -40,7 +58,8 @@ public sealed class CollectorService : BackgroundService {
 
     public CollectorService(GameLink link, DiscoveryService discovery, PrototypeExporter prototypes,
         ITimeSeriesStore store, ISnapshotBus bus, StallDetector stallDetector,
-        AutoResearchService autoResearch, IOptions<CollectorOptions> options, ILogger<CollectorService> log) {
+        AutoResearchService autoResearch, IEnumerable<IDerivedJob> derived,
+        IOptions<CollectorOptions> options, ILogger<CollectorService> log) {
         this.link = link;
         this.discovery = discovery;
         this.prototypes = prototypes;
@@ -48,6 +67,7 @@ public sealed class CollectorService : BackgroundService {
         this.bus = bus;
         this.stallDetector = stallDetector;
         this.autoResearch = autoResearch;
+        this.derived = derived;
         this.options = options.Value;
         this.log = log;
     }
@@ -144,7 +164,9 @@ public sealed class CollectorService : BackgroundService {
         JsonElement? assemblers = payload(snapshot, "assemblers", primary);
         if(production is JsonElement prod && assemblers is JsonElement asm) {
             IReadOnlyList<StallItem> stalls = stallDetector.Detect(prod, asm, 0.01, ts);
-            JsonElement stallPayload = JsonSerializer.SerializeToElement(new { stalled = stalls });
+            // snake_case wie alle Payloads aus dem Mod — das Frontend liest
+            // since_seconds, nicht SinceSeconds.
+            JsonElement stallPayload = FdashJson.ToElement(new { stalled = stalls });
             await bus.PublishAsync(new Snapshot("stall", saveId, ts, stallPayload));
         }
 
@@ -155,6 +177,18 @@ public sealed class CollectorService : BackgroundService {
             JsonElement? researchState = payload(snapshot, "research_state", primary);
             if(researchState is JsonElement rs) {
                 await evaluateAutoResearchAsync(rs, prodForRes, saveId, ts, ct);
+            }
+        }
+
+        // --- 6. Abgeleitete Auswertungen (Zug-Dauer, Problem-Rangliste) ---
+        // Ganz am Ende, damit sie den fertigen Bus sehen und aufeinander
+        // aufbauen koennen. Ein Fehler hier darf den Collector nicht anhalten:
+        // die Rohdaten sind wichtiger als die Auswertung.
+        foreach(IDerivedJob job in derived) {
+            try {
+                await job.RunAsync(snapshot, saveId, ts, ct);
+            } catch(Exception ex) {
+                log.LogWarning(ex, "Derived job {Job} failed", job.GetType().Name);
             }
         }
     }
@@ -177,13 +211,13 @@ public sealed class CollectorService : BackgroundService {
             JsonElement payloadJson;
             if(choice != null) {
                 string result = await autoResearch.ApplyAsync(choice, ct);
-                payloadJson = JsonSerializer.SerializeToElement(new {
+                payloadJson = FdashJson.ToElement(new {
                     tech = choice.Tech, level = choice.Level,
                     estimated_seconds = choice.EstimatedSeconds,
                     enabled = autoResearch.Enabled, can_write = autoResearch.CanWrite, result
                 });
             } else {
-                payloadJson = JsonSerializer.SerializeToElement(new {
+                payloadJson = FdashJson.ToElement(new {
                     tech = (string?)null, enabled = autoResearch.Enabled,
                     can_write = autoResearch.CanWrite,
                     result = "queue_not_empty_or_no_candidate"

@@ -143,6 +143,35 @@ Or over RCON, via `FDASH_HOST`, `FDASH_PORT`, `FDASH_PASS`.
 
 In game: `/fdash-status`.
 
+## MCP server for an AI
+
+The dashboard also speaks [MCP](https://modelcontextprotocol.io), so a model can ask about the
+factory instead of you reading panels. It runs inside the same process, as Streamable HTTP:
+
+```bash
+claude mcp add --transport http fdash http://localhost:5000/mcp
+```
+
+Reading costs the game nothing. The tools read the snapshot bus and the SQLite series the
+collector has already filled — no RCON round trip, no tick spent per question.
+
+| Tool | Answers |
+| --- | --- |
+| `get_health` | Is data arriving at all, over which transport, and how old is each job? |
+| `get_base_snapshot` | Power, research, machines, top bottlenecks, trains, robots, biggest deficits — one call. |
+| `get_problems` | Everything that is wrong right now, ranked, each with evidence and a suggestion. |
+| `get_machine_status_summary` | Machines per produced item: running, waiting for input (look upstream), output blocked (look downstream), and what is missing. |
+| `get_production_stats` | Produced/consumed per minute with a trend, so "just started" is distinguishable from "collapsing". |
+| `get_snapshot` | Raw job payload — the escape hatch for anything without its own tool. |
+
+Two rules shape every answer: lists are capped and say so (`truncated`, `total_available`), and
+every answer carries `data_age_seconds`, because a job that runs every 60 s can otherwise not be
+told apart from a value that is genuinely zero.
+
+Settings live under `Mcp` in `appsettings.json`. Writing tools are **off** (`AllowWriteTools`)
+and additionally gated by a whitelist; there is no tool that executes arbitrary Lua — everything
+goes through the mod's fixed `remote` interface.
+
 ## Architecture
 
 ```
@@ -154,10 +183,19 @@ script-output/fdash/  ──or──  RCON remote.call("fdash","snapshot")
    ▼
 GameLink (transport choice)  →  CollectorService
                                    ├─ SnapshotBus  → SignalR → React
+                                   │                └────────→ MCP tools (/mcp)
                                    ├─ SqliteTimeSeriesStore (roll-up tiers)
                                    ├─ StallDetector
+                                   ├─ derived jobs (Fdash.Analysis)
+                                   │    ├─ trains_derived — how long a train has been stuck
+                                   │    └─ problems       — ranked across all domains
                                    └─ AutoResearchService  ──RCON──▶  set_research
 ```
+
+The derived jobs go on the same bus as everything else. That is deliberate: the dashboard panel
+and the MCP tool then show the same ranking, computed once, instead of two implementations
+drifting apart — which is exactly what had happened with the root-cause analysis, which existed
+only in the frontend.
 
 Job intervals live in the mod, not in the server any more. The server only reads what is
 there and uses a per-job timestamp to tell what changed.

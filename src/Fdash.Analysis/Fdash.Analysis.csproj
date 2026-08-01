@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Fdash.Core\Fdash.Core.csproj" />
+    <ProjectReference Include="..\Fdash.Collector\Fdash.Collector.csproj" />
+    <ProjectReference Include="..\Fdash.Storage\Fdash.Storage.csproj" />
+  </ItemGroup>
+</Project>

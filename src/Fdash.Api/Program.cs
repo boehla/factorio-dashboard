@@ -1,3 +1,4 @@
+using Fdash.Analysis;
 using Fdash.Collector;
 using Fdash.Core;
 using Fdash.Rcon;
@@ -21,6 +22,7 @@ builder.Configuration
 builder.Services.Configure<CollectorOptions>(builder.Configuration.GetSection("Collector"));
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection("Storage"));
 builder.Services.Configure<IconOptions>(builder.Configuration.GetSection("Icons"));
+builder.Services.Configure<McpOptions>(builder.Configuration.GetSection("Mcp"));
 
 // --- Infrastruktur ---
 builder.Services.AddSingleton(sp => {
@@ -44,10 +46,35 @@ builder.Services.AddSingleton<StallDetector>();
 builder.Services.AddSingleton<AutoResearchService>();
 builder.Services.AddSingleton<IconService>();
 
+// --- Analyse (Fdash.Analysis) ---
+// Reihenfolge der IDerivedJob-Registrierung ist die Ausfuehrungsreihenfolge:
+// die Problem-Rangliste liest die Zug-Dauer aus trains_derived.
+builder.Services.AddSingleton<SnapshotView>();
+builder.Services.AddSingleton<TrendCalculator>();
+builder.Services.AddSingleton<TrainWatcher>();
+builder.Services.AddSingleton<ProblemAnalyzer>();
+builder.Services.AddSingleton<IDerivedJob, TrainDerivedJob>();
+builder.Services.AddSingleton<IDerivedJob, ProblemsDerivedJob>();
+
 // --- Hosted Services ---
 builder.Services.AddHostedService<CollectorService>();
 builder.Services.AddHostedService<RollupService>();
 builder.Services.AddHostedService<SnapshotRelay>();
+
+// --- MCP (Model Context Protocol) ---
+// Laeuft im selben Prozess wie das Dashboard, weil hier die Daten schon liegen:
+// ein Tool-Aufruf liest den Bus und die Zeitreihe und kostet im Spiel nichts.
+McpOptions mcpOptions = builder.Configuration.GetSection("Mcp").Get<McpOptions>() ?? new McpOptions();
+if(mcpOptions.Enabled) {
+    builder.Services
+        .AddMcpServer(o => {
+            o.ServerInfo = new ModelContextProtocol.Protocol.Implementation {
+                Name = "factorio-dashboard", Version = "0.2.0"
+            };
+        })
+        .WithHttpTransport()
+        .WithToolsFromAssembly();
+}
 
 // --- Web ---
 builder.Services.AddSignalR();
@@ -61,6 +88,10 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 
 app.MapHub<DashboardHub>("/hub");
+
+// Streamable HTTP unter /mcp — Anbindung z. B. mit
+//   claude mcp add --transport http fdash http://localhost:5000/mcp
+if(mcpOptions.Enabled) app.MapMcp("/mcp");
 
 // --- REST (Plan §7) ---
 app.MapGet("/api/snapshots", (ISnapshotBus bus) => Results.Json(bus.All()));

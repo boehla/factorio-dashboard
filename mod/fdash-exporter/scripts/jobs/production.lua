@@ -61,6 +61,15 @@ function job.run(st, si, budget)
     -- produziert = input in die Statistik, verbraucht = output
     local produced = util.statflow(stats, n, "input")
     local consumed = util.statflow(stats, n, "output")
+
+    -- Namen stehen in der Statistik, sobald sie EINMAL geflossen sind. Auf
+    -- einer gewachsenen Karte sind darum knapp zwei Drittel der Eintraege
+    -- laengst stillgelegt und melden in beide Richtungen null. Sie kosten
+    -- Serialisierung (der groesste Einzelposten im Tick) und sagen nichts:
+    -- ohne Durchsatz gibt es weder Ratio noch Engpass. Das Dashboard hat sie
+    -- ohnehin auf beiden Seiten weggefiltert.
+    if produced == 0 and consumed == 0 then return end
+
     items[#items + 1] = {
       item = n,
       type = kind,
