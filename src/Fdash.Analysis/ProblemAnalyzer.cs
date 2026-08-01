@@ -53,12 +53,15 @@ public sealed class ProblemAnalyzer {
             power(surface, problems);
             resources(surface, problems);
             robots(surface, problems);
+            fluids(surface, problems);
+            stations(surface, problems);
         }
 
         stalls(problems);
         trains(problems);
         platforms(problems);
         research(problems);
+        alerts(problems);
 
         problems.Sort((a, b) => {
             int c = b.Severity.CompareTo(a.Severity);
@@ -246,6 +249,153 @@ public sealed class ProblemAnalyzer {
                 Detail = $"{waiting} von {total} Logistikrobotern stehen in der Warteschlange, "
                     + $"{Json.Int(net, "roboports")} Roboports im Netz",
                 Suggestion = "mehr Roboports auf der Strecke — nicht mehr Roboter"
+            });
+        }
+    }
+
+    // ---------------------------------------------------------------- Fluide
+
+    /// <summary>
+    /// Volle Tanks bei laufender Produktion sind auf Pyanodons der haeufigste
+    /// versteckte Engpass: die Anlage steht nicht wegen fehlender Zutaten,
+    /// sondern weil ein Nebenprodukt nicht abfliesst.
+    /// </summary>
+    private void fluids(string surface, List<Problem> outp) {
+        JobPayload? fl = view.Get("fluids", surface);
+        JobPayload? prod = view.Get("production", surface);
+        if(fl == null) return;
+
+        Dictionary<string, (double P, double C)> flows = new Dictionary<string, (double, double)>(StringComparer.Ordinal);
+        if(prod != null) {
+            foreach(JsonElement it in Json.Array(prod.Data, "items")) {
+                if(Json.Str(it, "type") == "fluid") {
+                    flows[Json.Str(it, "item")] = (Json.Num(it, "produced_per_min"), Json.Num(it, "consumed_per_min"));
+                }
+            }
+        }
+
+        List<(Problem P, double Weight)> ranked = new List<(Problem, double)>();
+        foreach(JsonProperty f in Json.Object(fl.Data, "fluids")) {
+            double fill = Json.Num(f.Value, "fill");
+            int tanks = Json.Int(f.Value, "tanks");
+            if(tanks < 2) continue;
+            flows.TryGetValue(f.Name, out (double P, double C) flow);
+
+            if(fill >= BufferClassifier.FullAt && flow.P > 0) {
+                ranked.Add((new Problem {
+                    Domain = "fluids",
+                    Severity = clamp(0.35 + 0.3 * fill, 0.35, 0.7),
+                    Surface = surface,
+                    Title = $"{f.Name}: Tanks zu {fill * 100:0}% voll",
+                    Detail = $"{tanks} Tanks, Zulauf {flow.P:0}/min gegen Abnahme {flow.C:0}/min",
+                    Suggestion = "Abnehmer fehlt — Verbrauch ausbauen oder abfackeln. "
+                        + "Die Anlage davor steht sonst mit vollem Ausgang",
+                    Items = new List<string> { f.Name }
+                }, flow.P));
+            } else if(fill <= BufferClassifier.EmptyAt && flow.C > 0) {
+                ranked.Add((new Problem {
+                    Domain = "fluids",
+                    Severity = clamp(0.3 + flow.C / Math.Max(1, flow.P + flow.C) * 0.4, 0.3, 0.7),
+                    Surface = surface,
+                    Title = $"{f.Name}: Tanks leer",
+                    Detail = $"{tanks} Tanks, Zulauf {flow.P:0}/min gegen Abnahme {flow.C:0}/min",
+                    Suggestion = "Erzeugung reicht nicht — upstream weitersuchen",
+                    Items = new List<string> { f.Name }
+                }, flow.C));
+            }
+        }
+
+        ranked.Sort((a, b) => b.Weight.CompareTo(a.Weight));
+        foreach((Problem p, double _) in ranked.Take(5)) outp.Add(p);
+    }
+
+    // ------------------------------------------------------------- Bahnhoefe
+
+    /// <summary>
+    /// Bahnhoefe melden nur dann etwas, wenn ein Zug wirklich darauf wartet.
+    ///
+    /// Ein Bahnhof ohne Zug ist normal (Reserve, Ausbau, gerade abgefahren),
+    /// und "am Zuglimit" ist auf einer eingestellten Basis der Regelfall — beide
+    /// allein gemeldet ergaben auf dem Testsave 286 von 297 Stationen, also
+    /// keine Aussage. Erst der Abgleich mit den Zuegen im Zustand
+    /// destination_full zeigt, wo es wirklich staut.
+    /// </summary>
+    private void stations(string surface, List<Problem> outp) {
+        JobPayload? st = view.Get("stations", surface);
+        if(st == null) return;
+
+        // Ziele der wartenden Zuege zaehlen.
+        Dictionary<string, (int Waiting, int MaxStuck)> waiting =
+            new Dictionary<string, (int, int)>(StringComparer.Ordinal);
+        JobPayload? trains = view.Get("trains_derived");
+        if(trains != null) {
+            foreach(JsonElement p in Json.Array(trains.Data, "problems")) {
+                if(Json.Str(p, "state") != "destination_full") continue;
+                string dest = Json.Str(p, "schedule_station");
+                if(dest.Length == 0) continue;
+                waiting.TryGetValue(dest, out (int Waiting, int MaxStuck) w);
+                waiting[dest] = (w.Waiting + 1, Math.Max(w.MaxStuck, Json.Int(p, "stuck_seconds")));
+            }
+        }
+        if(waiting.Count == 0) return;
+
+        List<(Problem P, int Weight)> ranked = new List<(Problem, int)>();
+        foreach(JsonProperty s in Json.Object(st.Data, "stations")) {
+            if(!waiting.TryGetValue(s.Name, out (int Waiting, int MaxStuck) w)) continue;
+            int cnt = Json.Int(s.Value, "trains");
+            double? limit = Json.NumOrNull(s.Value, "limit");
+            ranked.Add((new Problem {
+                Domain = "trains",
+                Severity = clamp(0.3 + w.MaxStuck / 900.0, 0.3, 0.8),
+                Surface = surface,
+                Title = $"{s.Name}: {w.Waiting} {(w.Waiting == 1 ? "Zug wartet" : "Zuege warten")} auf Einfahrt",
+                Detail = $"{Json.Int(s.Value, "stops")} Stops, {cnt}"
+                    + (limit is double l ? $"/{l:0}" : "") + $" Zuege zugewiesen, "
+                    + $"laengste Wartezeit {w.MaxStuck}s",
+                // Zuglimit 0 ist kein Ueberlauf, sondern eine abgeschaltete
+                // Station — meist eine Schaltbedingung, die nicht mehr greift.
+                // Das sieht in der Zahl genauso aus und ist ein ganz anderer Fehler.
+                Suggestion = limit is double lim && lim == 0
+                    ? "Zuglimit steht auf 0 — die Station ist abgeschaltet. Schaltbedingung pruefen"
+                    : "Abnahme an dieser Station ist der Engpass — entladen, nicht mehr Zuege"
+            }, w.Waiting * 1000 + w.MaxStuck));
+        }
+
+        ranked.Sort((a, b) => b.Weight.CompareTo(a.Weight));
+        foreach((Problem p, int _) in ranked.Take(5)) outp.Add(p);
+    }
+
+    // ---------------------------------------------------------------- Alerts
+
+    private void alerts(List<Problem> outp) {
+        JobPayload? a = view.Get("alerts");
+        if(a == null) return;
+
+        foreach(KeyValuePair<string, double> kv in Json.NumMap(a.Data, "by_type")) {
+            if(kv.Value <= 0) continue;
+            outp.Add(new Problem {
+                Domain = "alerts",
+                Severity = kv.Key == "entity_destroyed" ? 0.8 : 0.45,
+                Title = $"Spiel-Alert: {kv.Key} ({kv.Value:0})",
+                Detail = "aus der Alert-Liste der verbundenen Spieler",
+                Suggestion = "im Spiel an der markierten Stelle nachsehen"
+            });
+        }
+
+        // Zerstoerte Gebaeude zaehlt der Mod selbst — auf einem Headless-Server
+        // ohne verbundenen Spieler ist die Alert-Liste oben immer leer.
+        int destroyed = Json.Int(a.Data, "destroyed_total");
+        if(destroyed > 0) {
+            List<string> what = new List<string>();
+            foreach(JsonElement d in Json.Array(a.Data, "destroyed_by_name")) {
+                what.Add($"{Json.Str(d, "name")}×{Json.Int(d, "count")}");
+            }
+            outp.Add(new Problem {
+                Domain = "alerts",
+                Severity = 0.75,
+                Title = $"{destroyed} Gebaeude zerstoert",
+                Detail = what.Count > 0 ? string.Join(", ", what.Take(6)) : "seit dem Start der Partie",
+                Suggestion = "Verteidigung pruefen — die Zahl laeuft seit Spielbeginn weiter"
             });
         }
     }

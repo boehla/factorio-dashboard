@@ -24,6 +24,12 @@ public static class MetricExtractor {
             case "resources":
                 extractResources(saveId, ts, root, samples);
                 break;
+            case "fluids":
+                extractFluids(saveId, ts, root, samples);
+                break;
+            case "containers":
+                extractContainers(saveId, ts, root, samples);
+                break;
         }
         return samples;
     }
@@ -80,6 +86,35 @@ public static class MetricExtractor {
             if(p.Value.TryGetProperty("depletion_seconds", out JsonElement d) && d.ValueKind == JsonValueKind.Number) {
                 outp.Add(new Sample(saveId, "resource.depletion_seconds", labels, ts, d.GetDouble()));
             }
+        }
+    }
+
+    /// <summary>
+    /// Tankfuellstand je Fluid. Erst der Verlauf macht daraus eine Aussage:
+    /// ein zu 80 % voller Tank ist gut, wenn er steigt, und ein Problem, wenn
+    /// er seit einer Stunde faellt.
+    /// </summary>
+    private static void extractFluids(string saveId, long ts, JsonElement root, List<Sample> outp) {
+        string surface = str(root, "surface");
+        if(!root.TryGetProperty("fluids", out JsonElement fluids) || fluids.ValueKind != JsonValueKind.Object) return;
+        foreach(JsonProperty p in fluids.EnumerateObject()) {
+            string labels = $"surface={surface},fluid={p.Name}";
+            outp.Add(new Sample(saveId, "fluid.amount", labels, ts, num(p.Value, "amount")));
+            outp.Add(new Sample(saveId, "fluid.fill", labels, ts, num(p.Value, "fill")));
+        }
+    }
+
+    /// <summary>
+    /// Kistenbestand je Item — dieselbe Ueberlegung wie bei den Tanks: der
+    /// Fuellstand allein sagt nichts, die Richtung schon.
+    /// </summary>
+    private static void extractContainers(string saveId, long ts, JsonElement root, List<Sample> outp) {
+        string surface = str(root, "surface");
+        if(!root.TryGetProperty("items", out JsonElement items) || items.ValueKind != JsonValueKind.Object) return;
+        foreach(JsonProperty p in items.EnumerateObject()) {
+            if(p.Value.ValueKind != JsonValueKind.Number) continue;
+            outp.Add(new Sample(saveId, "storage.item_count",
+                $"surface={surface},item={p.Name}", ts, p.Value.GetDouble()));
         }
     }
 

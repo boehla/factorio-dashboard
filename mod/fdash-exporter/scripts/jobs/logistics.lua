@@ -65,6 +65,28 @@ function job.run(st, si, budget)
     local all_con = net.all_construction_robots
     local avail_con = net.available_construction_robots
 
+    -- Bestand im Netz. Der Aufruf geht ueber das ganze Netz, wird also mit
+    -- Zusatzkosten verrechnet. Uebertragen werden nur die groessten Posten:
+    -- ein Mall-Netz fuehrt hunderte Item-Sorten, und die unteren 300 davon
+    -- sind einzelne Bauteile ohne Aussagekraft.
+    local contents = nil
+    local ok, items = pcall(function() return net.get_contents() end)
+    if ok and items then
+      local list = {}
+      for k, v in pairs(items) do
+        local name, count
+        if type(v) == "table" then name, count = v.name, v.count else name, count = k, v end
+        list[#list + 1] = { name = name, count = count }
+        st.extra = st.extra + 1
+      end
+      table.sort(list, function(a, b)
+        if a.count ~= b.count then return a.count > b.count end
+        return a.name < b.name
+      end)
+      contents = {}
+      for i = 1, math.min(40, #list) do contents[list[i].name] = list[i].count end
+    end
+
     nets[#nets + 1] = {
       id = id,
       roboports = #cells,
@@ -82,7 +104,8 @@ function job.run(st, si, budget)
         working = math.max(0, all_con - avail_con),
         charging = 0,
         waiting_for_charge = 0
-      }
+      },
+      contents = contents
     }
   end)
 

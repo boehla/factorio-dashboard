@@ -10,6 +10,17 @@ Date: 2026-08-01
       packs, maximum level and the recipes each one unlocks.
     - Recipes carry allow_productivity and the raw product probability, so a throughput
       estimate can tell an expected value from a guaranteed one.
+    - New collector "fluids": tank contents per fluid with fill level and temperature. A full
+      tank means the consumer is missing, an empty one means the producer is — neither is
+      visible in the production statistics.
+    - New collector "stations": train stops grouped by name, with assigned trains against the
+      train limit. Shows the stations that are never served and the ones that always queue.
+    - New collector "containers": chest contents aggregated per item. Off by default
+      (fdash-container-scan) because it reads one inventory per chest.
+    - New collector "alerts": the game's own alerts from connected players, plus the mod's own
+      count of destroyed player buildings — on a headless server with nobody connected the
+      game's alert list is always empty.
+    - The logistic collector now reports the largest stacks held in each network.
   Optimizations:
     - The full list of researched technologies is only sent when it actually changed. On large
       modpacks it is tens of kilobytes, and it changes once every few minutes at most.

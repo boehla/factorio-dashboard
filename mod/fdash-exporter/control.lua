@@ -34,6 +34,9 @@ local function init_storage()
   storage.covered_v = storage.covered_v or {}
   storage.covered_t = storage.covered_t or {}
   storage.errors = storage.errors or {}
+  -- Zerstoerte Gebaeude der Spieler-Force (siehe events.lua). Bewusst klein:
+  -- ein Zaehler, eine Namensliste und ein Ring der letzten 16 Vorfaelle.
+  storage.deaths = storage.deaths or { count = 0, by_name = {}, recent = {}, ri = 0 }
   if not storage.scan then scan.init() end
 end
 

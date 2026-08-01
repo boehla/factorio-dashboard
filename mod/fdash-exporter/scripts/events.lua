@@ -68,6 +68,27 @@ function events.register()
     scan.enqueue(event.surface_index)
   end)
 
+  -- --------------------------------------------------------- Zerstoerungen
+  -- Die einzige Ausnahme von "keine Destroy-Events": ein Zaehler fuer
+  -- zerstoerte Gebaeude der Spieler-Force. Der Filter ist entscheidend — ohne
+  -- ihn feuert das bei jedem sterbenden Beisser, also hunderte Male pro Tick
+  -- im Kampf. Mit Filter kommt der Handler nur dran, wenn wirklich etwas von
+  -- der Basis kaputtgeht, und macht dann drei Tabellenzugriffe.
+  --
+  -- Noetig, weil player.get_alerts an einen verbundenen Spieler gebunden ist:
+  -- auf einem Headless-Server ohne Spieler ist die Alert-Liste leer.
+  script.on_event(defines.events.on_entity_died, function(event)
+    local e = event.entity
+    if not (e and e.valid) then return end
+    local d = storage.deaths
+    d.count = d.count + 1
+    d.by_name[e.name] = (d.by_name[e.name] or 0) + 1
+    -- Kleiner Ring der letzten Vorfaelle, damit man die Stelle findet.
+    d.ri = (d.ri % 16) + 1
+    d.recent[d.ri] = { name = e.name, tick = event.tick,
+                       x = math.floor(e.position.x), y = math.floor(e.position.y) }
+  end, { { filter = "force", force = "player" } })
+
   -- --------------------------------------------------------------- Chunks
   -- Feuert bei Erkundung sehr oft -> Handler minimal halten.
   script.on_event(defines.events.on_chunk_generated, function(event)

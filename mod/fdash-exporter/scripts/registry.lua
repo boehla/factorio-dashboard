@@ -37,6 +37,10 @@ registry.TYPES = {
   "electric-pole",
   "roboport",
   "constant-combinator",
+  "train-stop",
+  "storage-tank",
+  "container",
+  "logistic-container",
 }
 
 local type_set = nil

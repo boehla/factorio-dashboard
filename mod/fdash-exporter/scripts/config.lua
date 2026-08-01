@@ -31,6 +31,12 @@ function config.file_output() return bool("fdash-file-output", true) end
 
 function config.resource_scan() return bool("fdash-resource-scan", true) end
 
+function config.fluid_scan() return bool("fdash-fluid-scan", true) end
+
+--- Aus, solange es niemand einschaltet: der Sweep ueber alle Kisten ist der
+--- teuerste Collector des Mods (ein Inventar-Read je Kiste).
+function config.container_scan() return bool("fdash-container-scan", false) end
+
 function config.covered_refresh_ticks()
   return int("fdash-covered-refresh-minutes", 10) * 60 * 60
 end

@@ -95,7 +95,8 @@ const TRAIN_STATE_DE: Record<string, string> = {
 // kritisch. Warnungen ans Ende sortieren.
 const trainLevel = (state: string) => (state === "destination_full" ? "warn" : "crit");
 
-export function AlertsPanel({ trains, stall, power }: { trains: any; stall: any; power: any }) {
+export function AlertsPanel({ trains, stall, power, alerts }:
+  { trains: any; stall: any; power: any; alerts?: any }) {
   // Problemzuege nach Zustand gruppieren (alle "Ziel voll" zusammen usw.),
   // damit man auf einen Blick sieht welcher Fehler wie viele Zuege betrifft.
   const problems = (trains?.problems ?? []) as any[];
@@ -114,6 +115,17 @@ export function AlertsPanel({ trains, stall, power }: { trains: any; stall: any;
     extra.push({ text: `${s.item} stalled (${s.reason}, ${s.since_seconds}s)`, level: "crit" }));
   const net = largestNetwork(power?.networks ?? []);
   if(net && net.satisfaction < 0.9) extra.push({ text: `Strom ${(net.satisfaction * 100).toFixed(0)}%`, level: "warn" });
+
+  // Spiel-Alerts hängen an einem verbundenen Spieler; auf einem Headless-Server
+  // ist die Liste leer. Der Zerstörungszähler des Mods läuft trotzdem.
+  Object.entries((alerts?.by_type ?? {}) as Record<string, number>)
+    .filter(([, n]) => n > 0)
+    .forEach(([type, n]) => extra.push({ text: `${type} · ${n}`, level: "warn" }));
+  if((alerts?.destroyed_total ?? 0) > 0) {
+    const what = (alerts.destroyed_by_name ?? []).slice(0, 3)
+      .map((d: any) => `${d.name}×${d.count}`).join(", ");
+    extra.push({ text: `${alerts.destroyed_total} Gebäude zerstört${what ? ` (${what})` : ""}`, level: "crit" });
+  }
 
   const nothing = states.length === 0 && extra.length === 0;
   return (

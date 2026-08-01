@@ -165,6 +165,9 @@ collector has already filled — no RCON round trip, no tick spent per question.
 | `get_research_state` | Running research with progress and ETA, the queue, and the science pack that limits your SPM. |
 | `get_power_report` | Per network: production, demand, headroom, accumulator charge trend, and how often it fell short in the window. |
 | `get_recipe_tree` | The chain around an item — prototype structure crossed with the live rate, machine count and unlocking technology. |
+| `get_fluid_report` | Tank levels per fluid with trend and buffer state, plus which fluids nobody consumes. |
+| `get_train_report` | Trains by state with how long they have been stuck, and stations against their train limit. |
+| `get_logistic_and_storage` | Robot networks and what is actually stored, in the network and (optionally) in chests. |
 | `get_history` | A metric over time as buckets with min/max and a trend, not a raw point cloud. |
 | `get_snapshot` | Raw job payload — the escape hatch for anything without its own tool. |
 

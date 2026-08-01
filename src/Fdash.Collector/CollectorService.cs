@@ -36,7 +36,8 @@ public interface IDerivedJob {
 public sealed class CollectorService : BackgroundService {
     /// <summary>Jobs, deren Werte in die Zeitreihe gehen (Rest ist nur Live-Anzeige).</summary>
     private static readonly HashSet<string> Persisted = new(StringComparer.Ordinal) {
-        "power", "assemblers", "logistics", "circuits", "production", "platforms", "drills", "resources"
+        "power", "assemblers", "logistics", "circuits", "production", "platforms", "drills", "resources",
+        "fluids", "containers"
     };
 
     private readonly GameLink link;

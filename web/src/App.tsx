@@ -7,6 +7,9 @@ import {
 import { ShortagesPanel } from "./components/ShortagesPanel";
 import { ProblemsPanel } from "./components/ProblemsPanel";
 import { PlatformsPanel } from "./components/PlatformsPanel";
+import { FluidsPanel } from "./components/FluidsPanel";
+import { TrainsPanel } from "./components/TrainsPanel";
+import { StoragePanel } from "./components/StoragePanel";
 import { ProducingItemsGraph } from "./components/ProducingItemsGraph";
 
 const PLANETS = ["nauvis", "vulcanus", "fulgora", "gleba", "aquilo"];
@@ -92,7 +95,8 @@ export default function App() {
             <PowerPanel data={snaps.power} />
             <ResearchPanel audit={audit} enabled={autoResearch} onToggle={toggleResearch}
               state={snaps[`research_state@${planet}`] ?? snaps.research_state} production={production} />
-            <AlertsPanel trains={snaps.trains_derived ?? snaps.trains} stall={snaps.stall} power={snaps.power} />
+            <AlertsPanel trains={snaps.trains_derived ?? snaps.trains} stall={snaps.stall}
+              power={snaps.power} alerts={snaps.alerts} />
             <RobotsPanel data={snaps.logistics} />
           </div>
 
@@ -107,6 +111,14 @@ export default function App() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <ResourcesPanel data={snaps[`resources@${planet}`]} />
             <ProductionPanel data={production} assemblers={assemblers} />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <FluidsPanel data={snaps[`fluids@${planet}`]} production={production} />
+            <TrainsPanel data={snaps[`stations@${planet}`]}
+              trains={snaps.trains_derived ?? snaps.trains} />
+            <StoragePanel logistics={snaps[`logistics@${planet}`]}
+              containers={snaps[`containers@${planet}`]} />
           </div>
         </>
       )}

@@ -29,6 +29,10 @@ local JOBS = {
   require("scripts.jobs.resources"),
   require("scripts.jobs.platforms"),
   require("scripts.jobs.orbital"),
+  require("scripts.jobs.stations"),
+  require("scripts.jobs.fluids"),
+  require("scripts.jobs.containers"),
+  require("scripts.jobs.alerts"),
 }
 
 scheduler.JOBS = JOBS

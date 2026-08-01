@@ -68,5 +68,24 @@ data:extend({
     minimum_value = 1,
     maximum_value = 240,
     order = "d-b"
+  },
+  -- Fluidtanks: billig genug fuer den Dauerbetrieb. Auf Pyanodons ist die
+  -- Gasbilanz die halbe Diagnose, deshalb per Default an.
+  {
+    type = "bool-setting",
+    name = "fdash-fluid-scan",
+    setting_type = "runtime-global",
+    default_value = true,
+    order = "e-a"
+  },
+  -- Kisteninhalte: ein get_contents PRO Kiste, und davon hat eine gewachsene
+  -- Basis zehntausende. Der Sweep ist budgetiert, ein voller Durchlauf dauert
+  -- damit aber Minuten — deshalb per Default aus.
+  {
+    type = "bool-setting",
+    name = "fdash-container-scan",
+    setting_type = "runtime-global",
+    default_value = false,
+    order = "e-b"
   }
 })
