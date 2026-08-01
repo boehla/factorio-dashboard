@@ -175,14 +175,18 @@ collector has already filled — no RCON round trip, no tick spent per question.
 | `get_resource_patches` | Ore patch by patch: centre, remaining, depletion, drills — the answer to "when do I need a new outpost". |
 | `get_pollution_and_threat` | Evolution with its breakdown, pollution produced against absorbed, buildings lost. |
 | `get_snapshot` | Raw job payload — the escape hatch for anything without its own tool. |
+| `set_research` ⚠️ | The one writing tool. Off unless `Mcp:AllowWriteTools` is set, and it needs RCON. |
 
 Two rules shape every answer: lists are capped and say so (`truncated`, `total_available`), and
 every answer carries `data_age_seconds`, because a job that runs every 60 s can otherwise not be
 told apart from a value that is genuinely zero.
 
-Settings live under `Mcp` in `appsettings.json`. Writing tools are **off** (`AllowWriteTools`)
-and additionally gated by a whitelist; there is no tool that executes arbitrary Lua — everything
-goes through the mod's fixed `remote` interface.
+Settings live under `Mcp` in `appsettings.json`. Writing is guarded in three independent places:
+the server must allow it (`AllowWriteTools`) **and** the tool must be on the whitelist; it needs
+RCON, because the file transport is one-way; and the mod validates the call itself — only an
+unlocked, unresearched technology with an empty queue. That last check is the one that counts,
+because it holds no matter who sends the call. There is no tool that executes arbitrary Lua;
+everything goes through the mod's fixed `remote` interface.
 
 ## Architecture
 
