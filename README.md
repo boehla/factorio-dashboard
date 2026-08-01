@@ -162,6 +162,10 @@ collector has already filled — no RCON round trip, no tick spent per question.
 | `get_problems` | Everything that is wrong right now, ranked, each with evidence and a suggestion. |
 | `get_machine_status_summary` | Machines per produced item: running, waiting for input (look upstream), output blocked (look downstream), and what is missing. |
 | `get_production_stats` | Produced/consumed per minute with a trend, so "just started" is distinguishable from "collapsing". |
+| `get_research_state` | Running research with progress and ETA, the queue, and the science pack that limits your SPM. |
+| `get_power_report` | Per network: production, demand, headroom, accumulator charge trend, and how often it fell short in the window. |
+| `get_recipe_tree` | The chain around an item — prototype structure crossed with the live rate, machine count and unlocking technology. |
+| `get_history` | A metric over time as buckets with min/max and a trend, not a raw point cloud. |
 | `get_snapshot` | Raw job payload — the escape hatch for anything without its own tool. |
 
 Two rules shape every answer: lists are capped and say so (`truncated`, `total_available`), and
