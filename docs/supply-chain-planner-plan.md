@@ -109,9 +109,11 @@ Alle unter `/api/supply-chain/`:
 
 ## 3. Frontend (React/TypeScript – `web/`)
 
-### 3.1 Neue Seite / View
+### 3.1 Layout & View
 
 Erweiterung in `App.tsx`: Dritter View-Modus `"planner"` neben `"dashboard"` und `"graph"`.
+
+**Mehrere Chains**: Alle gespeicherten Chains werden untereinander, leicht abgetrennt (Card-Design mit Border/Hintergrund) dargestellt. Jede Chain ist ein eigener kollabierbarer TreeView-Block. Der Expand/Collapse-Zustand jeder Chain wird im `localStorage` gespeichert und beim nächsten Laden wiederhergestellt.
 
 Neue Komponente: **`SupplyChainPlanner`** (`web/src/components/SupplyChainPlanner.tsx`)
 
@@ -119,31 +121,40 @@ Neue Komponente: **`SupplyChainPlanner`** (`web/src/components/SupplyChainPlanne
 
 ```
 SupplyChainPlanner
-├── ChainList (linke Seitenleiste)
+├── Toolbar (oben)
 │   ├── "Neue Chain" Button
-│   └── Liste gespeicherter Chains (target_item, recipe, last_updated)
-│       └── pro Eintrag: auswählen, umbenennen, löschen
+│   └── Surface-Auswahl (nauvis/vulcanus/...)
 │
-└── ChainEditor (Hauptbereich)
-    ├── ChainHeader
-    │   ├── Item-Selektor (SearchInput für Item-Name)
-    │   └── Recipe-Selektor (Dropdown/Umschalter wenn >1 Rezept)
-    │
-    └── IngredientTree (rekursiver Baum)
-        └── IngredientNode (rekursiv)
-            ├── ItemIcon + Name + Typ (item/fluid)
-            ├── Menge pro Craft
-            ├── Source-Toggle: [Lokal bauen] | [Train] | [Bus/Import]
-            ├── Status-Indikator:
-            │   ├── 🟢 Train: im Netzwerk verfügbar (provide)
-            │   ├── 🟡 Train: nur als Request vorhanden
-            │   ├── 🔴 Train: nicht im Netzwerk
-            │   ├── 🟢 Local: Rezept konfiguriert, Zutaten definiert
-            │   ├── 🟡 Local: Rezept gewählt, aber Zutaten noch offen
-            │   └── ⚪ Local: kein Rezept gewählt
-            ├── Wenn Local → Recipe-Selektor für dieses Item
-            │   └── Dann rekursiv IngredientTree für dessen Zutaten
-            └── Aktionen: [Entfernen] [Als erledigt markieren]
+└── ChainsContainer (untereinander, vertikal scrollbar)
+    └── ChainCard (pro gespeicherte Chain, abgetrennt durch Border/Shadow)
+        ├── ChainHeader (immer sichtbar, kollabierbar)
+        │   ├── Collapse-Toggle (▶/▼) → localStorage
+        │   ├── Item-Selektor (SearchInput für Item-Name)
+        │   ├── Recipe-Selektor (Dropdown/Umschalter wenn >1 Rezept)
+        │   ├── Target-Rate Input: "___ items/min" (optional)
+        │   │   └── Wenn gesetzt → ProductionPlan-Berechnung wird aktiv
+        │   ├── Chain umbenennen / löschen (X-Button)
+        │   └── Save-Button (oder Auto-Save)
+        │
+        └── ChainBody (collapsed wenn localStorage sagt zu)
+            ├── ProductionPlanSummary (wenn target_per_min > 0)
+            │   └── pro Stufe: machines needed / machines present / coverage %
+            │
+            └── IngredientTree (rekursiver Baum)
+                └── IngredientNode (rekursiv)
+                    ├── ItemIcon + Name + Typ (item/fluid)
+                    ├── Menge pro Craft (bzw. Menge pro Zielrate wenn target gesetzt)
+                    ├── Source-Toggle: [Lokal bauen] | [Train] | [Ignorieren]
+                    ├── Status-Indikator:
+                    │   ├── 🟢 Train: im Netzwerk verfügbar (provide)
+                    │   ├── 🟡 Train: nur als Request vorhanden
+                    │   ├── 🔴 Train: nicht im Netzwerk
+                    │   ├── 🟢 Local: Rezept konfiguriert, Zutaten definiert
+                    │   ├── 🟡 Local: Rezept gewählt, aber Zutaten noch offen
+                    │   └── ⚪ Local: kein Rezept gewählt
+                    ├── Wenn Local → Recipe-Selektor für dieses Item
+                    │   └── Dann rekursiv IngredientNode für dessen Zutaten
+                    └── Aktionen: [Source wechseln] [Zu Ignorieren]
 ```
 
 ### 3.3 Datenfluss & State-Management
@@ -157,6 +168,7 @@ interface SupplyChain {
   recipeName: string;
   name: string | null;
   surface: string;
+  targetPerMin: number | null;    // gewünschte Zielrate, null = keine Vorgabe
   nodes: SupplyChainNode[];
   createdAt: string;
   updatedAt: string;
@@ -167,7 +179,7 @@ interface SupplyChainNode {
   itemName: string;
   itemType: 'item' | 'fluid';
   amountPerCraft: number;
-  source: 'local' | 'train' | 'bus';
+  source: 'local' | 'train' | 'ignore';
   childRecipe: string | null;
   children: SupplyChainNode[];
 }
@@ -189,8 +201,16 @@ interface RecipeOption {
 
 ```typescript
 const [chains, setChains] = useState<SupplyChain[]>([]);
-const [activeChainId, setActiveChainId] = useState<number | null>(null);
 const [trainAvailability, setTrainAvailability] = useState<TrainAvailability>({ provides: {}, requests: {} });
+const [expandedChains, setExpandedChains] = useState<Record<number, boolean>>(() => {
+  // aus localStorage wiederherstellen
+  const stored = localStorage.getItem('fdash-expanded-chains');
+  return stored ? JSON.parse(stored) : {};
+});
+// expand/collapse Persistenz:
+useEffect(() => {
+  localStorage.setItem('fdash-expanded-chains', JSON.stringify(expandedChains));
+}, [expandedChains]);
 ```
 
 **Datenabruf:**
@@ -208,12 +228,15 @@ const [trainAvailability, setTrainAvailability] = useState<TrainAvailability>({ 
 
 ### 3.5 Interaktionen
 
+- **Chain anlegen**: Toolbar-Button → POST `/api/supply-chain` → neue Chain erscheint unten in der Liste
 - **Item auswählen**: `SearchInput` mit Autocomplete aus `items`-Prototypen + Icon-Vorschau
+- **Target-Rate setzen**: Input-Feld "___ items/min" im ChainHeader. Wenn gesetzt → ProductionPlan wird berechnet (Server-seitig via `ProductionPlanner`), die Mengen im Baum skalieren entsprechend
 - **Rezept wechseln**: Tabs/Buttons, "Use this recipe" setzt `recipe_name` in der Chain
-- **Source togglen**: Click auf `[Lokal]`/`[Train]` wechselt den Modus
+- **Source togglen**: Click auf `[Lokal]`/`[Train]`/`[Ignorieren]` wechselt den Modus
   - Wechsel zu Train → `childRecipe` = null, `children` = [] (keine weitere Auflösung)
+  - Wechsel zu Ignorieren → `childRecipe` = null, `children` = [] (ausgegraut, kein Status-Indikator)
   - Wechsel zu Local → wenn noch kein Recipe → zeigt Recipe-Auswahl
-- **Baum expandieren/kollabieren**: Click auf Pfeil-Icon
+- **Chain expandieren/kollabieren**: Click auf ▶/▼ im ChainHeader → Zustand in `localStorage` gespeichert
 - **Speichern**: "Save" Button → `PUT /api/supply-chain/{id}/nodes` mit gesamten aktuellen Baum
 - **Auto-Save**: Optional nach jeder Änderung mit Debounce (2s)
 
@@ -241,9 +264,10 @@ const [trainAvailability, setTrainAvailability] = useState<TrainAvailability>({ 
 
 ### Phase 4 – Feinschliff
 13. Auto-Save mit Debounce
-14. Export/Import einer Chain als JSON
-15. Visuelle Aufbereitung (Icons, Farben, Tooltips)
+14. Expand/Collapse-Persistenz via localStorage
+15. Visuelle Aufbereitung (Icons, Farben, Tooltips, Chain-Cards mit Abgrenzung)
 16. Integration in die Hauptnavigation (neuer "Planner"-Tab)
+17. ProductionPlan-Integration (target_per_min → Maschinen-Berechnung pro Stufe)
 
 ---
 
@@ -287,27 +311,32 @@ const [trainAvailability, setTrainAvailability] = useState<TrainAvailability>({ 
 ## 6. Beispielablauf
 
 1. Benutzer öffnet "Planner", klickt "Neue Chain"
-2. Wählt via SearchInput: `py-science-pack-2`
+2. Wählt via SearchInput: `py-science-pack-2`, gibt `60` items/min als Zielrate ein
 3. Es gibt 1 Rezept → wird automatisch ausgewählt
-4. Ingredients erscheinen:
+4. ProductionPlanSummary erscheint: "12 Maschinen benötigt, 8 vorhanden (67%)"
+5. Ingredients erscheinen mit skalierten Mengen (basierend auf target_per_min):
    - `blank-tech-card` → Benutzer stellt auf **Train**
      - → 🔴 Nicht im Netzwerk → klickt auf "Rezept wählen"
      - → Wählt Rezept, setzt auf **Local**
      - → dessen Zutaten erscheinen rekursiv
-   - `advanced-circuit` → bereits auf 🔵 **Bus** (manuell setzbar)
+   - `advanced-circuit` → Benutzer stellt auf **Ignorieren** (anderer Bauabschnitt)
    - `chemical-science-pack` → 🟢 **Train** (wird erkannt, da im Netzwerk)
-5. Später baut jemand eine Station für `blank-tech-card` → Live-Update macht den Train-Indikator 🔴→🟢
-6. Benutzer speichert → Chain ist nach Server-Neustart wieder da
+6. Chain wird gespeichert → bleibt nach Server-Neustart erhalten
+7. Chain zuklappen (▶) → localStorage merkt sich den Zustand → Seite neuladen → Chain ist zugeklappt
+8. Später baut jemand eine Station für `blank-tech-card` → Live-Update macht den Train-Indikator 🔴→🟢
+9. ProductionPlan-Zahlen aktualisieren sich live mit dem nächsten Snapshot
 
 ---
 
-## 7. Offene Fragen / Entscheidungen
+## 7. Entscheidungen (geklärt)
 
-- [ ] **Fluids**: Immer per Pipe? Oder via Train (fluid wagon)? → Vermutlich auch `local`/`train`-Umschalter
-- [ ] **Bus/Import**: Brauchen wir eine dritte Source-Option für "kommt vom Main-Bus"?
-- [ ] **Mengen-Berechnung**: Soll die Chain auch Mengen skalieren können? ("Ich brauche 60/min science pack 2, wie viele Maschinen pro Stufe?") – könnte `ProductionPlanner` integrieren
-- [ ] **Export/Share**: Soll man Chains exportieren/importieren können? (JSON-Download)
-- [ ] **Mehrere Chains parallel anzeigen**: Tab-Toggle oder Multi-View?
+| Thema | Entscheidung |
+|-------|-------------|
+| Fluids | Gleicher `local`/`train`/`ignore`-Umschalter wie Items, keine Sonderbehandlung |
+| Dritte Source-Option | Statt "Bus" → **"Ignorieren"**: Item wird ausgegraut, keine weitere Auflösung |
+| Mengen-Berechnung | Am Haupt-Item `target_per_min` angeben, `ProductionPlanner` integrieren, Mengen im Baum skalieren |
+| Export/Share | Nicht benötigt |
+| Mehrere Chains | Untereinander als Cards, per TreeView kollabierbar, `localStorage` für Expand/Collapse-Zustand |
 
 ---
 
@@ -320,5 +349,10 @@ const [trainAvailability, setTrainAvailability] = useState<TrainAvailability>({ 
 | Train-Erkennung | `StationNames`-Parser (C# Server + TS Client) |
 | Live-Update | SignalR `stations@` Snapshot → Client parst Station-Namen |
 | Forschung | `research_state` + `assemblers` → abgeleitet |
+| Mengen-Planung | `ProductionPlanner` integriert, `target_per_min` am Haupt-Item |
+| Source-Optionen | `local` (bauen) / `train` (Netzwerk) / `ignore` (ausgeblendet) |
+| Fluids | Gleicher Mechanismus wie Items |
+| Layout | Chains untereinander als Cards, kollabierbar |
+| UI-Persistenz | Expand/Collapse in `localStorage` |
 | Frontend | Neue React-Komponente, rekursiver Baum |
-| Persistenz | Automatisch via API → SQLite |
+| Persistenz | Automatisch via API → SQLite, überlebt Server-Neustart |

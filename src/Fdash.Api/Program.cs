@@ -57,6 +57,11 @@ builder.Services.AddSingleton<ProblemAnalyzer>();
 builder.Services.AddSingleton<IDerivedJob, TrainDerivedJob>();
 builder.Services.AddSingleton<IDerivedJob, ProblemsDerivedJob>();
 
+// --- Supply Chain Planner ---
+builder.Services.AddSingleton<SupplyChainService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<SupplyChainService>());
+builder.Services.AddSingleton<ProductionPlanner>();
+
 // --- Hosted Services ---
 builder.Services.AddHostedService<CollectorService>();
 builder.Services.AddHostedService<RollupService>();
@@ -154,4 +159,68 @@ app.MapGet("/api/health", async (GameLink link, PrototypeExporter proto, Cancell
     });
 });
 
+// --- Supply Chain Planner ---
+app.MapGet("/api/supply-chain", async (SupplyChainService sc) => Results.Json(await sc.ListAsync()));
+
+app.MapGet("/api/supply-chain/{id:int}", async (int id, SupplyChainService sc) => {
+    var chain = await sc.GetAsync(id);
+    return chain == null ? Results.NotFound() : Results.Json(chain);
+});
+
+app.MapPost("/api/supply-chain", async (HttpRequest req, SupplyChainService sc) => {
+    var body = await req.ReadFromJsonAsync<CreateChainRequest>();
+    if (body == null || string.IsNullOrWhiteSpace(body.TargetItem)) return Results.BadRequest("targetItem required");
+    var chain = await sc.CreateAsync(body.TargetItem, body.RecipeName ?? body.TargetItem, body.Surface ?? "nauvis", body.TargetPerMin);
+    return Results.Json(chain);
+});
+
+app.MapPut("/api/supply-chain/{id:int}", async (int id, HttpRequest req, SupplyChainService sc) => {
+    var body = await req.ReadFromJsonAsync<UpdateChainRequest>();
+    if (body == null) return Results.BadRequest();
+    bool ok = await sc.UpdateAsync(id, body.Name, body.TargetItem, body.RecipeName, body.TargetPerMin);
+    return ok ? Results.Ok() : Results.NotFound();
+});
+
+app.MapPut("/api/supply-chain/{id:int}/nodes", async (int id, HttpRequest req, SupplyChainService sc) => {
+    var body = await req.ReadFromJsonAsync<ReplaceNodesRequest>();
+    if (body == null) return Results.BadRequest();
+    await sc.ReplaceNodesAsync(id, body.Nodes ?? new List<SupplyNodeDto>());
+    return Results.Json(new { updated = true });
+});
+
+app.MapDelete("/api/supply-chain/{id:int}", async (int id, SupplyChainService sc) => {
+    bool ok = await sc.DeleteAsync(id);
+    return ok ? Results.Ok() : Results.NotFound();
+});
+
+app.MapGet("/api/supply-chain/train-availability", (string? surface, SupplyChainService sc) => {
+    return Results.Json(sc.GetTrainAvailability(surface ?? "nauvis"));
+});
+
+app.MapGet("/api/supply-chain/recipes/{item}", (string item, string? surface, SupplyChainService sc) => {
+    return Results.Json(sc.GetRecipesForItem(item, surface ?? "nauvis"));
+});
+
 app.Run();
+
+namespace Fdash.Api {
+
+internal sealed record CreateChainRequest {
+    public string TargetItem { get; init; } = "";
+    public string? RecipeName { get; init; }
+    public string? Surface { get; init; }
+    public double? TargetPerMin { get; init; }
+}
+
+internal sealed record UpdateChainRequest {
+    public string? Name { get; init; }
+    public string? TargetItem { get; init; }
+    public string? RecipeName { get; init; }
+    public double? TargetPerMin { get; init; }
+}
+
+internal sealed record ReplaceNodesRequest {
+    public List<SupplyNodeDto>? Nodes { get; init; }
+}
+
+}

@@ -11,6 +11,7 @@ import { FluidsPanel } from "./components/FluidsPanel";
 import { TrainsPanel } from "./components/TrainsPanel";
 import { StoragePanel } from "./components/StoragePanel";
 import { ProducingItemsGraph } from "./components/ProducingItemsGraph";
+import { SupplyChainPlanner } from "./components/SupplyChainPlanner";
 
 const PLANETS = ["nauvis", "vulcanus", "fulgora", "gleba", "aquilo"];
 // Plattformen haengen an keiner Oberflaeche, teilen sich aber die Auswahlleiste
@@ -20,7 +21,7 @@ const PLATFORMS = "platforms";
 export default function App() {
   const { snaps, connected } = useSnapshots();
   const [planet, setPlanet] = useState("nauvis");
-  const [view, setView] = useState<"dashboard" | "graph">("dashboard");
+  const [view, setView] = useState<"dashboard" | "graph" | "planner">("dashboard");
   const [audit, setAudit] = useState<any[]>([]);
   const [autoResearch, setAutoResearch] = useState(false);
 
@@ -57,10 +58,10 @@ export default function App() {
         <h1 className="text-lg font-bold">Factorio Dashboard</h1>
         <div className="flex items-center gap-2">
           <div className="flex gap-1">
-            {(["dashboard", "graph"] as const).map(v => (
+            {(["dashboard", "graph", "planner"] as const).map(v => (
               <button key={v} onClick={() => setView(v)}
                 className={`px-3 py-1 rounded text-sm ${view === v ? "bg-panelborder" : "bg-panel"}`}>
-                {v === "dashboard" ? "Dashboard" : "Item-Graph"}
+                {v === "dashboard" ? "Dashboard" : v === "graph" ? "Item-Graph" : "Planner"}
               </button>
             ))}
           </div>
@@ -87,6 +88,8 @@ export default function App() {
 
       {isGraph ? (
         <ProducingItemsGraph planet={planet} production={production} assemblers={assemblers} />
+      ) : view === "planner" ? (
+        <SupplyChainPlanner planet={planet} stationsSnap={snaps[`stations@${planet}`] ?? snaps.stations} />
       ) : planet === PLATFORMS ? (
         <PlatformsPanel data={snaps.platforms} />
       ) : (

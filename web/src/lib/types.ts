@@ -28,3 +28,43 @@ export interface AssemblerGroup {
   starving?: number;
   missing?: Record<string, number>;
 }
+
+// --- Supply Chain Planner ---
+export interface SupplyChain {
+  id: number;
+  targetItem: string;
+  recipeName: string;
+  name: string | null;
+  surface: string;
+  targetPerMin: number | null;
+  nodes: SupplyNode[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupplyNode {
+  id?: number;
+  itemName: string;
+  itemType: 'item' | 'fluid';
+  amountPerCraft: number;
+  source: 'local' | 'train' | 'ignore';
+  childRecipe: string | null;
+  children: SupplyNode[];
+}
+
+export interface TrainAvailability {
+  provides: Record<string, { itemType: string; stationCount: number }>;
+  requests: Record<string, { itemType: string; stationCount: number }>;
+}
+
+export interface RecipeOption {
+  name: string;
+  energy: number;
+  category: string | null;
+  allowProductivity: boolean;
+  isResearched: boolean;
+  isProducing: boolean;
+  machineCount: number;
+  ingredients: { name: string; type: string; amount: number }[];
+  products: { name: string; type: string; amount: number }[];
+}
