@@ -398,6 +398,39 @@ try {
             RecipeQuery.StateFrom(prodPayload, asmPayload), RecipeQuery.MachinesFrom(asmPayload))
         .Children.Any(c => c.Item == "copper-ore" && c.IsLeaf && !c.DepthLimited));
 
+    // Eine Stufe statt eines Baums: das Werkzeug fuer "erst schauen, dann
+    // gezielt tiefer". Es darf genau nicht rekursiv werden.
+    SnapshotBus recipeBus = new SnapshotBus();
+    await recipeBus.PublishAsync(new Snapshot("meta", "testsave", now,
+        FdashJson.ToElement(new { surfaces = new[] { "nauvis" } })));
+    await recipeBus.PublishAsync(new Snapshot("assemblers@nauvis", "testsave", now, asmPayload));
+    SnapshotView recipeView = new SnapshotView(recipeBus);
+
+    string oneLevel = RecipeTools.GetRecipeIngredients(recipeView, protoExporter,
+        Options.Create(mcpOptions), "circuit,copper-ore,not-a-thing");
+    Check("ingredients: direct ingredients are listed",
+        oneLevel.Contains("copper-cable") && oneLevel.Contains("iron-plate"));
+    // copper-plate haengt eine Ebene unter copper-cable — taucht es auf, ist
+    // die Rekursion zurueck, die dieses Werkzeug gerade vermeiden soll.
+    Check("ingredients: stops after one level",
+        !oneLevel.Contains("copper-plate"));
+    Check("ingredients: output count comes along",
+        RecipeTools.GetRecipeIngredients(recipeView, protoExporter,
+            Options.Create(mcpOptions), "copper-cable").Contains("\"produces\":2"));
+    Check("ingredients: ore is raw, a typo is unknown",
+        oneLevel.Contains("\"raw_items\":[\"copper-ore\"]")
+        && oneLevel.Contains("\"unknown_items\":[\"not-a-thing\"]"));
+    Check("ingredients: the built recipe is the one reported",
+        oneLevel.Contains("\"machines_running_it\":4") && !oneLevel.Contains("arbitrary_pick"));
+    // copper-cable entsteht auch aus dem Recyclingrezept scrap-back, und keines
+    // von beiden steht in dieser Testfabrik.
+    Check("ingredients: an unbuilt pick among several says so",
+        RecipeTools.GetRecipeIngredients(recipeView, protoExporter, Options.Create(mcpOptions), "copper-cable")
+            .Contains("\"arbitrary_pick\":true"));
+
+    string wholeTree = RecipeTools.GetRecipeTree(recipeView, protoExporter, Options.Create(mcpOptions), "circuit");
+    Check("ingredients: cheaper than the tree it replaces", oneLevel.Length < wholeTree.Length);
+
     // ----------------------------------------------------------------------
     // 13) ChainDiagnoser: die erste klemmende Stufe, nicht irgendeine. Der Fall
     //     ist der haeufigste echte: das Endprodukt hungert, die Stufe darunter
@@ -457,6 +490,136 @@ try {
 } finally {
     try { Directory.Delete(protoDir, true); } catch { }
 }
+
+// --------------------------------------------------------------------------
+// 15) TechGraph: "was fehlt mir bis Technologie X". Der Laufzeit-Job meldet nur
+//     die Kandidaten und — gedeckelt — die, denen genau eine Voraussetzung
+//     fehlt. Der Erforscht-Stand muss also entweder gemeldet oder aus den
+//     Kandidaten hergeleitet werden, und beides muss dasselbe ergeben.
+//
+//     Baum: base <- mid <- gate <- deep <- goal, goal haengt zusaetzlich an mid.
+//     Kandidat ist nur gate, also sind base und mid erforscht.
+// --------------------------------------------------------------------------
+TechProto Tech(string name, params string[] pre) => new TechProto {
+    Name = name, UnitCount = 100, UnitEnergy = 30,
+    Prerequisites = pre.ToList(),
+    Packs = new List<RecipeIo> { new RecipeIo { Name = "automation-science-pack", Amount = 1 } },
+    UnlockedRecipes = new List<string> { name + "-recipe" }
+};
+
+Dictionary<string, TechProto> techTree = new Dictionary<string, TechProto> {
+    ["base"] = Tech("base"),
+    ["mid"] = Tech("mid", "base"),
+    ["gate"] = Tech("gate", "mid"),
+    ["deep"] = Tech("deep", "gate"),
+    ["goal"] = Tech("goal", "deep", "mid")
+};
+JsonElement techState = FdashJson.ToElement(new {
+    candidates = new[] { new { name = "gate" } },
+    active_labs = 0, total_labs = 10, lab_speed = 1.0, research_speed_bonus = 0.0
+});
+
+TechGraph derivedGraph = new TechGraph(techTree, techState);
+Check("tech: derives researched from the candidate list",
+    derivedGraph.Source == "derived" && derivedGraph.IsResearched("base") && derivedGraph.IsResearched("mid"));
+Check("tech: a candidate is not researched",
+    !derivedGraph.IsResearched("gate") && derivedGraph.StatusOf("gate") == TechStatus.Available);
+Check("tech: anything behind a candidate is blocked",
+    derivedGraph.StatusOf("deep") == TechStatus.Blocked && derivedGraph.StatusOf("goal") == TechStatus.Blocked);
+Check("tech: unknown name is distinguishable from blocked",
+    derivedGraph.StatusOf("does-not-exist") == TechStatus.Unknown && !derivedGraph.Knows("does-not-exist"));
+Check("tech: only the missing direct prerequisites are reported",
+    derivedGraph.MissingPrerequisites("goal").SequenceEqual(new[] { "deep" }));
+
+List<string> goalPath = derivedGraph.ResearchPath("goal");
+Check("tech: path holds every unresearched step, target last",
+    goalPath.SequenceEqual(new[] { "gate", "deep", "goal" }));
+Check("tech: path is empty for something already researched",
+    derivedGraph.ResearchPath("mid").Count == 0);
+
+// Die gemeldete Liste hat Vorrang — sie kennt auch abgeschaltete Technologien,
+// die die Herleitung faelschlich fuer erforscht haelt.
+TechGraph reportedGraph = new TechGraph(techTree, techState,
+    new HashSet<string>(StringComparer.Ordinal) { "base", "mid", "gate" });
+Check("tech: reported list wins over the derivation",
+    reportedGraph.Source == "reported" && reportedGraph.IsResearched("gate")
+    && reportedGraph.ResearchPath("goal").SequenceEqual(new[] { "deep", "goal" }));
+
+// Ein Zyklus entsteht durch ein Mod-Update schneller als man denkt; er darf
+// nicht in einen Stack Overflow laufen.
+Dictionary<string, TechProto> cyclic = new Dictionary<string, TechProto> {
+    ["x"] = Tech("x", "y"),
+    ["y"] = Tech("y", "x")
+};
+TechGraph cyclicGraph = new TechGraph(cyclic, FdashJson.ToElement(new { candidates = new[] { new { name = "x" } } }));
+Check("tech: a prerequisite cycle terminates", cyclicGraph.ResearchPath("y").Count > 0);
+
+TechLedger ledger = new TechLedger();
+Check("tech ledger: nothing remembered yet", ledger.Researched("save-a") == null);
+ledger.Observe(FdashJson.ToElement(new { researched = new[] { "base", "mid" } }), "save-a");
+Check("tech ledger: keeps the reported list", ledger.Researched("save-a")?.Contains("mid") == true);
+ledger.Observe(FdashJson.ToElement(new { candidates = new[] { new { name = "gate" } } }), "save-a");
+Check("tech ledger: a payload without the list changes nothing",
+    ledger.Researched("save-a")?.Count == 2);
+Check("tech ledger: another save does not inherit it", ledger.Researched("save-b") == null);
+
+// --------------------------------------------------------------------------
+// 16) Stationsnamen als Warenliste. Factorio kennt kein "diese Station liefert
+//     Eisen" — die Information steht nur im Namen, und die Namen kommen aus
+//     einem Blueprint-Schema: [item=x][virtual-signal=signal-output] liefert.
+//     Die Faelle, an denen eine naive Lesart scheitert, stehen alle im echten
+//     Save: Beitext hinter dem Tag, ein virtuelles Signal als Ware und
+//     Stationen ganz ohne Rolle.
+// --------------------------------------------------------------------------
+Check("station name: output signal marks a provider",
+    StationNames.Parse("[item=iron-plate][virtual-signal=signal-output]") is { Item: "iron-plate", Type: "item", Provides: true, Requests: false });
+Check("station name: input signal marks a consumer",
+    StationNames.Parse("[item=iron-ore][virtual-signal=signal-input]") is { Item: "iron-ore", Requests: true, Provides: false });
+Check("station name: text after the tag does not hide the fluid",
+    StationNames.Parse("[fluid=steam]150°C[virtual-signal=signal-output]") is { Item: "steam", Type: "fluid", Provides: true });
+Check("station name: a virtual signal can be the ware itself",
+    StationNames.Parse("[virtual-signal=signal-fire][virtual-signal=signal-output]") is { Item: "signal-fire", Type: "virtual-signal", Provides: true });
+Check("station name: quality rides on the item tag",
+    StationNames.Parse("[item=iron-plate,quality=rare][virtual-signal=signal-output]").Item == "iron-plate");
+Check("station name: a depot has no role",
+    !StationNames.Parse("New[item=cargo-wagon]").HasRole);
+Check("station name: a plain name yields nothing",
+    StationNames.Parse("Refuel West") is { Item: null, Provides: false, Requests: false });
+
+object Stop(int stops) => new { stops, trains = 0 };
+await bus.PublishAsync(new Snapshot("stations@nauvis", "testsave", now, FdashJson.ToElement(new {
+    surface = "nauvis",
+    stations = new Dictionary<string, object> {
+        ["[item=iron-plate][virtual-signal=signal-output]"] = Stop(6),
+        ["[item=iron-plate][virtual-signal=signal-input]"] = Stop(3),
+        ["[fluid=steam][virtual-signal=signal-output]"] = Stop(2),
+        ["[item=ash][virtual-signal=signal-output]"] = Stop(1),
+        ["[item=ash]O[virtual-signal=signal-output]"] = Stop(2),
+        ["[item=iron-ore][virtual-signal=signal-input]"] = Stop(4),
+        ["New[item=cargo-wagon]"] = Stop(12)
+    } })));
+
+string netProvide = TrainTools.GetTrainNetworkItems(view, Options.Create(mcpOptions));
+Check("network items: only what a station actually provides",
+    netProvide.Contains("iron-plate") && netProvide.Contains("steam") && !netProvide.Contains("iron-ore"));
+Check("network items: stations without a role are counted, not listed",
+    !netProvide.Contains("cargo-wagon") && netProvide.Contains("\"stations_total\":7"));
+Check("network items: fluids are marked as such", netProvide.Contains("\"type\":\"fluid\""));
+Check("network items: two names for one ware collapse into one entry",
+    netProvide.Contains("\"name\":\"ash\",\"stops\":3,\"station_names\":2"));
+// Eisen hat je eine Liefer- und eine Abnahmestation — das sind nicht zwei
+// Lieferstationen.
+Check("network items: the name count stays inside the asked role",
+    netProvide.Contains("\"name\":\"iron-plate\",\"stops\":6}"));
+
+string netBoth = TrainTools.GetTrainNetworkItems(view, Options.Create(mcpOptions), role: "both");
+Check("network items: both roles show both sides",
+    netBoth.Contains("iron-ore") && netBoth.Contains("\"provide_stops\":6,\"request_stops\":3"));
+
+string netAsk = TrainTools.GetTrainNetworkItems(view, Options.Create(mcpOptions), "iron-plate,tungsten-plate,iron-ore");
+Check("network items: the filter answers found against missing",
+    netAsk.Contains("\"missing\":[\"tungsten-plate\",\"iron-ore\"]") && netAsk.Contains("iron-plate"));
+Check("network items: the filtered answer stays small", netAsk.Length < 400);
 
 Console.WriteLine($"\n{(failures == 0 ? "ALL PASSED" : failures + " FAILED")}");
 return failures;

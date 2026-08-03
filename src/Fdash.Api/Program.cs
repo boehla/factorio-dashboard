@@ -52,6 +52,7 @@ builder.Services.AddSingleton<IconService>();
 builder.Services.AddSingleton<SnapshotView>();
 builder.Services.AddSingleton<TrendCalculator>();
 builder.Services.AddSingleton<TrainWatcher>();
+builder.Services.AddSingleton<TechLedger>();
 builder.Services.AddSingleton<ProblemAnalyzer>();
 builder.Services.AddSingleton<IDerivedJob, TrainDerivedJob>();
 builder.Services.AddSingleton<IDerivedJob, ProblemsDerivedJob>();

@@ -165,13 +165,16 @@ collector has already filled — no RCON round trip, no tick spent per question.
 | `get_research_state` | Running research with progress and ETA, the queue, and the science pack that limits your SPM. |
 | `get_power_report` | Per network: production, demand, headroom, accumulator charge trend, and how often it fell short in the window. |
 | `get_recipe_tree` | The chain around an item — prototype structure crossed with the live rate, machine count and unlocking technology. |
+| `get_recipe_ingredients` | Only the direct ingredients, one level deep — the cheap step you iterate with instead of pulling a whole tree. |
 | `get_fluid_report` | Tank levels per fluid with trend and buffer state, plus which fluids nobody consumes. |
 | `get_train_report` | Trains by state with how long they have been stuck, and stations against their train limit. |
+| `get_train_network_items` | What the rail network carries, deduplicated from the station names — with `items=`, a one-call answer to "does the network have X?". |
 | `get_logistic_and_storage` | Robot networks and what is actually stored, in the network and (optionally) in chests. |
 | `get_history` | A metric over time as buckets with min/max and a trend, not a raw point cloud. |
 | `diagnose_item_chain` | Walks the chain upstream and names the first stage that actually stops — with numbers and what to do. |
 | `plan_production` | How many machines per step for a target rate, using the measured crafting speed, and which step is the limit. |
 | `suggest_next_research` | Ranked research options — fastest, cheapest, unblocks the most, or fixes a current shortage. |
+| `get_technology` | One technology in detail, plus the ordered path of every missing prerequisite — "what is still missing until X". |
 | `get_resource_patches` | Ore patch by patch: centre, remaining, depletion, drills — the answer to "when do I need a new outpost". |
 | `get_pollution_and_threat` | Evolution with its breakdown, pollution produced against absorbed, buildings lost. |
 | `get_snapshot` | Raw job payload — the escape hatch for anything without its own tool. |

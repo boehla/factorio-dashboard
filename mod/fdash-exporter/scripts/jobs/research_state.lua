@@ -45,6 +45,13 @@ end
 -- mitzuschleppen.
 local last_researched_count = {}
 
+-- Zusaetzlich alle paar Durchlaeufe unabhaengig von einer Aenderung. Der Server
+-- haelt die Liste im Speicher; wird er neu gestartet, ohne dass zwischendurch
+-- eine Forschung fertig wird, haette er sie sonst nie wieder gesehen. Bei knapp
+-- tausend Namen und diesem Intervall faellt das nicht ins Gewicht.
+local RESEND_EVERY = 20
+local runs_since_full = {}
+
 --- Zutatenliste einer Technologie als {name=, amount=}-Array.
 local function unit_ingredients(t)
   local list = {}
@@ -194,10 +201,12 @@ function job.run(st, si, budget)
     candidates = candidates
   }
 
-  -- Vollstaendige Liste nur bei Aenderung (siehe Kopfkommentar).
-  if last_researched_count[si] ~= st.researched_count then
+  -- Vollstaendige Liste bei Aenderung, sonst periodisch (siehe Kopfkommentar).
+  runs_since_full[si] = (runs_since_full[si] or 0) + 1
+  if last_researched_count[si] ~= st.researched_count or runs_since_full[si] >= RESEND_EVERY then
     payload.researched = researched
     last_researched_count[si] = st.researched_count
+    runs_since_full[si] = 0
   end
 
   st.phase = nil

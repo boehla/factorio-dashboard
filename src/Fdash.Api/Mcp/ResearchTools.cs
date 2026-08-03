@@ -138,6 +138,153 @@ public static class ResearchTools {
         });
     }
 
+    [McpServerTool(Name = "get_technology")]
+    [Description("Eine einzelne Technologie im Detail: erforscht/forschbar/blockiert, Kosten, "
+        + "Wissenschaftspakete mit ihrem aktuellen Durchsatz und die freigeschalteten Rezepte — "
+        + "vor allem aber der vollstaendige Forschungspfad dorthin: alle noch fehlenden "
+        + "Voraussetzungen in der Reihenfolge, in der sie erforscht werden muessen, mit "
+        + "Gesamtkosten und Gesamtdauer. Die Antwort auf 'was fehlt mir bis X'.")]
+    public static string GetTechnology(
+            SnapshotView view, PrototypeExporter proto, TechLedger ledger, IOptions<McpOptions> opts,
+            [Description("Name der Technologie, z. B. py-science-pack-2")] string name,
+            [Description("Forschungspfad mit ausgeben")] bool includePath = true,
+            [Description("Maximale Anzahl Schritte im Pfad, Default 40")] int pathLimit = 40,
+            [Description("Oberflaeche, leer = Hauptoberflaeche")] string? surface = null) {
+        if(string.IsNullOrWhiteSpace(name)) {
+            return ToolResponse.Error("Kein Technologiename angegeben.",
+                "Beispiel: name = \"py-science-pack-2\". Forschbare Namen liefert get_research_state.");
+        }
+        string surf = view.ResolveSurface(surface ?? opts.Value.DefaultSurface);
+        JobPayload? rs = view.Get("research_state", surf);
+        if(rs == null) return ToolResponse.NoData("research_state", surf);
+        if(proto.Technologies.Count == 0) {
+            return ToolResponse.Error("Es sind keine Technologie-Prototypen geladen.",
+                "prototypes.json fehlt oder stammt aus einer Mod-Version vor 0.2.0. Neu exportieren "
+                + "mit remote.call('fdash','export_prototypes'). Zustand: get_health.");
+        }
+
+        // Die vollstaendige Erforscht-Liste kommt nur gelegentlich mit; hier
+        // wird sie mitgenommen, wenn sie da ist, und sonst der gemerkte Stand
+        // (oder als letzte Stufe die Herleitung aus den Kandidaten) benutzt.
+        ledger.Observe(rs.Data, rs.SaveId);
+        TechGraph graph = new TechGraph(proto.Technologies, rs.Data, ledger.Researched(rs.SaveId));
+
+        if(!graph.Knows(name)) {
+            List<string> guesses = similar(proto, name);
+            return ToolResponse.Error($"Technologie '{name}' ist unbekannt.",
+                guesses.Count > 0
+                    ? "Gemeint war vielleicht: " + string.Join(", ", guesses)
+                    : "Namen sind die internen Prototypnamen, z. B. py-science-pack-2 statt 'pY Science 2'.");
+        }
+
+        TechProto target = proto.Technologies[name];
+        Dictionary<string, (double Produced, double Consumed)> flows = productionFlows(view, surf);
+        double rate = labRate(rs.Data);
+
+        double producedOf(string item) =>
+            flows.TryGetValue(item, out (double Produced, double Consumed) f) ? ToolResponse.R(f.Produced, 1) : 0;
+        double secondsFor(TechProto t) => rate > 0 ? t.UnitCount * t.UnitEnergy / rate : double.PositiveInfinity;
+
+        // ------------------------------------------------------------- Pfad
+        // Der Pfad wird immer gerechnet — die Summen und die fehlenden Pakete
+        // sind die eigentliche Antwort. includePath entscheidet nur, ob auch
+        // die einzelnen Schritte mit ausgegeben werden.
+        List<string> path = graph.ResearchPath(name);
+
+        // Summen ueber den ganzen Pfad, nicht nur ueber die ausgegebene Seite —
+        // sonst stimmt die Gesamtdauer nicht mehr, sobald gekuerzt wird.
+        double totalUnits = 0;
+        double totalSeconds = 0;
+        HashSet<string> packsMissing = new HashSet<string>(StringComparer.Ordinal);
+        foreach(string step in path) {
+            if(!proto.Technologies.TryGetValue(step, out TechProto? t)) continue;
+            totalUnits += t.UnitCount;
+            double s = secondsFor(t);
+            if(double.IsFinite(s)) totalSeconds += s;
+            foreach(RecipeIo p in t.Packs) {
+                if(producedOf(p.Name) <= 0) packsMissing.Add(p.Name);
+            }
+        }
+
+        List<string> page = new List<string>();
+        bool truncated = false;
+        if(includePath) {
+            (page, truncated, _) = ToolResponse.Cap(path, pathLimit, opts.Value.MaxItems);
+        }
+
+        List<object> steps = new List<object>();
+        double cumulative = 0;
+        int index = 0;
+        foreach(string step in page) {
+            index++;
+            if(!proto.Technologies.TryGetValue(step, out TechProto? t)) continue;
+            double s = secondsFor(t);
+            if(double.IsFinite(s)) cumulative += s;
+            steps.Add(new {
+                step = index,
+                name = step,
+                status = statusName(graph.StatusOf(step)),
+                cost_units = t.UnitCount,
+                est_minutes = double.IsFinite(s) ? ToolResponse.R(s / 60, 1) : (double?)null,
+                cumulative_minutes = ToolResponse.R(cumulative / 60, 1),
+                packs = t.Packs.Select(p => new { name = p.Name, count = p.Amount }).ToList(),
+                unlocks_recipes = t.UnlockedRecipes.Take(6).ToList()
+            });
+        }
+
+        return ToolResponse.Ok(new {
+            surface = surf,
+            data_age_seconds = rs.AgeSeconds,
+            name,
+            status = statusName(graph.StatusOf(name)),
+            // Woher der Erforscht-Stand stammt: "reported" ist die Liste des
+            // Mods, "derived" die Herleitung aus den Kandidaten. Letztere haelt
+            // per Skript abgeschaltete Technologien faelschlich fuer erforscht.
+            researched_source = graph.Source,
+            cost_units = target.UnitCount,
+            seconds_per_unit = ToolResponse.R(target.UnitEnergy),
+            max_level = target.MaxLevel,
+            upgrade = target.Upgrade,
+            packs = target.Packs.Select(p => new {
+                name = p.Name,
+                count = p.Amount,
+                produced_per_min = producedOf(p.Name)
+            }).ToList(),
+            unlocks_recipes = target.UnlockedRecipes.Take(12).ToList(),
+            direct_prerequisites = target.Prerequisites.Select(p => new {
+                name = p,
+                status = statusName(graph.StatusOf(p))
+            }).ToList(),
+            missing_prerequisites = graph.MissingPrerequisites(name),
+            eta_assumes_all_labs = Json.Int(rs.Data, "active_labs") == 0 && Json.Int(rs.Data, "total_labs") > 0,
+            path_steps = path.Count,
+            path_total_units = ToolResponse.R(totalUnits, 0),
+            path_total_minutes = rate > 0 ? ToolResponse.R(totalSeconds / 60, 1) : (double?)null,
+            // Pakete, die auf dem Weg gebraucht werden und gerade gar nicht
+            // laufen — ohne die faengt der Pfad nicht einmal an.
+            packs_not_produced = packsMissing.OrderBy(p => p, StringComparer.Ordinal).ToList(),
+            truncated,
+            research_path = steps
+        });
+    }
+
+    private static string statusName(TechStatus s) => s switch {
+        TechStatus.Researched => "researched",
+        TechStatus.Available => "available",
+        TechStatus.Blocked => "blocked",
+        _ => "unknown"
+    };
+
+    /// <summary>Namensvorschlaege bei einem Tippfehler — Prototypnamen sind lang und kryptisch.</summary>
+    private static List<string> similar(PrototypeExporter proto, string query) {
+        List<string> hits = new List<string>();
+        foreach(string tech in proto.Technologies.Keys) {
+            if(tech.Contains(query, StringComparison.OrdinalIgnoreCase)) hits.Add(tech);
+        }
+        hits.Sort(StringComparer.Ordinal);
+        return hits.Take(8).ToList();
+    }
+
     [McpServerTool(Name = "suggest_next_research")]
     [Description("Bewertet die forschbaren Technologien und schlaegt welche vor. optimize_for: "
         + "throughput (schnellste), cheapest (guenstigste), unlock_bottleneck (loest einen aktuell "

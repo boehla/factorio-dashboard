@@ -12,6 +12,10 @@ namespace Fdash.Api.Mcp;
 /// Zwei Seiten derselben Frage: haengende Zuege sagen, dass etwas klemmt;
 /// die Bahnhoefe sagen, wo. Eine Station ohne Zug ist eine tote Route, eine
 /// mit Dauerwarteschlange ein Ladeengpass.
+///
+/// Dazu die dritte Frage, die dieselben Daten beantworten: was das Netz
+/// ueberhaupt fuehrt (<c>get_train_network_items</c>) — die Warenliste steckt
+/// in den Stationsnamen, nicht in den Zuegen.
 /// </summary>
 [McpServerToolType]
 public static class TrainTools {
@@ -110,5 +114,121 @@ public static class TrainTools {
             stations_truncated = stationsTotal > stations.Count,
             stations
         });
+    }
+
+    [McpServerTool(Name = "get_train_network_items")]
+    [Description("Welche Waren das Zugnetz fuehrt: deduplizierte Liste aus den Stationsnamen, getrennt "
+        + "nach Lieferstation ([virtual-signal=signal-output]) und Abnehmer (signal-input), mit Zahl der "
+        + "Stops je Ware. Mit items= wird daraus die direkte Antwort auf \"hat das Netz X?\" — gefunden "
+        + "gegen fehlend, ohne die ganze Liste zu lesen.")]
+    public static string GetTrainNetworkItems(
+            SnapshotView view, IOptions<McpOptions> opts,
+            [Description("Nur diese Namen pruefen, kommagetrennt — leer = ganze Liste")] string? items = null,
+            [Description("Rolle: provide (liefert) | request (nimmt ab) | both")] string role = "provide",
+            [Description("Oberflaeche, leer = Hauptoberflaeche")] string? surface = null,
+            [Description("Maximale Anzahl Namen, Default 300")] int limit = 300) {
+        string surf = view.ResolveSurface(surface ?? opts.Value.DefaultSurface);
+        JobPayload? st = view.Get("stations", surf);
+        if(st == null) return ToolResponse.NoData("stations", surf);
+
+        bool wantProvide = role != "request";
+        bool wantRequest = role != "provide";
+        bool both = wantProvide && wantRequest;
+
+        // Zusammenfassen ueber die Namen: dieselbe Ware haengt an mehreren
+        // Stationsnamen ([item=ash]O neben [item=ash]), und genau die Doppelung
+        // soll hier verschwinden.
+        Dictionary<string, Ware> byItem = new Dictionary<string, Ware>(StringComparer.Ordinal);
+        int stationsTotal = 0, withRole = 0, withoutItem = 0;
+
+        foreach(JsonProperty s in Json.Object(st.Data, "stations")) {
+            stationsTotal++;
+            StationLabel label = StationNames.Parse(s.Name);
+            if(!label.HasRole) continue;
+            withRole++;
+            if(label.Item == null) {
+                // Rollensignal ohne Ware — ein Name, aus dem sich nichts ablesen laesst.
+                withoutItem++;
+                continue;
+            }
+
+            int stops = Json.Int(s.Value, "stops");
+            string key = label.Type + "|" + label.Item;
+            Ware prev = byItem.TryGetValue(key, out Ware? e) ? e : new Ware(label.Item, label.Type);
+            byItem[key] = prev with {
+                ProvideStops = prev.ProvideStops + (label.Provides ? stops : 0),
+                RequestStops = prev.RequestStops + (label.Requests ? stops : 0),
+                ProvideNames = prev.ProvideNames + (label.Provides ? 1 : 0),
+                RequestNames = prev.RequestNames + (label.Requests ? 1 : 0)
+            };
+        }
+
+        // Nur Waren, die in der gefragten Rolle wirklich vorkommen. Ohne das
+        // stuende ein reiner Abnehmer in der Provide-Liste und das Netz haette
+        // scheinbar etwas, das niemand liefert.
+        List<Ware> all = byItem.Values
+            .Where(v => (wantProvide && v.ProvideStops > 0) || (wantRequest && v.RequestStops > 0))
+            .OrderBy(v => v.Name, StringComparer.Ordinal)
+            .ThenBy(v => v.Type, StringComparer.Ordinal)
+            .ToList();
+
+        // Gefragte Namen zuerst: die Antwort ist dann klein und vollstaendig,
+        // egal wie gross das Netz ist.
+        List<string>? missing = null;
+        if(!string.IsNullOrWhiteSpace(items)) {
+            List<string> wanted = items
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.Ordinal).ToList();
+            HashSet<string> have = new HashSet<string>(all.Select(v => v.Name), StringComparer.Ordinal);
+            missing = wanted.Where(w => !have.Contains(w)).ToList();
+            all = all.Where(v => wanted.Contains(v.Name, StringComparer.Ordinal)).ToList();
+        }
+
+        // MaxItems deckelt Objektlisten mit vielen Feldern; ein Eintrag ist hier
+        // ein Name und zwei Zahlen. Bei 50 gekappt wuerde die Liste die Frage
+        // sogar falsch beantworten ("fuehrt das Netz nicht"), deshalb ein
+        // eigener, hoeherer Deckel.
+        int cap = Math.Clamp(limit <= 0 ? 300 : limit, 1, 500);
+        List<object> list = new List<object>();
+        foreach(Ware w in all.Take(cap)) {
+            // Nur die Namen der gefragten Rolle: sonst zaehlt eine Ware mit je
+            // einer Liefer- und einer Abnahmestation als "zwei Lieferstationen".
+            int names = both ? w.ProvideNames + w.RequestNames : (wantProvide ? w.ProvideNames : w.RequestNames);
+            list.Add(new {
+                name = w.Name,
+                // "item" ist der Normalfall und kostet sonst nur Tokens.
+                type = w.Type == "item" ? null : w.Type,
+                stops = both ? (int?)null : (wantProvide ? w.ProvideStops : w.RequestStops),
+                provide_stops = both ? w.ProvideStops : (int?)null,
+                request_stops = both ? w.RequestStops : (int?)null,
+                // Mehrere Stationsnamen fuer dieselbe Ware — Hinweis auf
+                // Varianten (Temperatur, Qualitaet, zwei Aussenposten).
+                station_names = names > 1 ? names : (int?)null
+            });
+        }
+
+        return ToolResponse.Ok(new {
+            surface = surf,
+            data_age_seconds = st.AgeSeconds,
+            role = both ? "both" : (wantProvide ? "provide" : "request"),
+            stations_total = stationsTotal,
+            stations_with_role = withRole,
+            // Namen mit Rollensignal, aber ohne erkennbare Ware — wenn das gross
+            // ist, folgt das Netz einem anderen Namensschema als angenommen.
+            stations_without_item = withoutItem > 0 ? withoutItem : (int?)null,
+            total_available = all.Count,
+            truncated = all.Count > list.Count,
+            // Nur mit items=: die gefragten Namen, die in dieser Rolle fehlen.
+            missing,
+            items = list
+        });
+    }
+
+    /// <summary>Eine Ware im Netz, zusammengefasst ueber alle Stationsnamen.</summary>
+    private sealed record Ware(string Name, string Type) {
+        public int ProvideStops { get; init; }
+        public int RequestStops { get; init; }
+        public int ProvideNames { get; init; }
+        public int RequestNames { get; init; }
     }
 }

@@ -1,4 +1,12 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.2.1
+Date: 2026-08-02
+  Changes:
+    - The research export now resends the full list of researched technologies every 20 runs,
+      not only when it changes. The dashboard keeps that list in memory to answer "what is
+      still missing until technology X"; without a periodic resend it would lose the list on
+      restart and only see it again after the next finished research.
+---------------------------------------------------------------------------------------------------
 Version: 0.2.0
 Date: 2026-08-01
   Features:
