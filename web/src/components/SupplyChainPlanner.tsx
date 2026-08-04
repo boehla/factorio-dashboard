@@ -152,7 +152,12 @@ function ChainCard({ chain, expanded, onToggle, onDelete, onUpdate, onSaveNodes,
   const [recipes, setRecipes] = useState<RecipeOption[]>([]);
   const [showRecipes, setShowRecipes] = useState(false);
 
-  useEffect(() => { setLocalNodes(chain.nodes ?? []); }, [chain.id]);
+  useEffect(() => {
+    // Load full chain with nodes from the API
+    fetch(`/api/supply-chain/${chain.id}`).then(r => r.json()).then(c => {
+      setLocalNodes(c.nodes ?? []);
+    }).catch(() => {});
+  }, [chain.id]);
 
   const loadRecipes = async (item: string) => {
     const r = await fetch(`/api/supply-chain/recipes/${item}?surface=${planet}`);

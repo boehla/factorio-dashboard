@@ -356,3 +356,51 @@ useEffect(() => {
 | UI-Persistenz | Expand/Collapse in `localStorage` |
 | Frontend | Neue React-Komponente, rekursiver Baum |
 | Persistenz | Automatisch via API → SQLite, überlebt Server-Neustart |
+
+---
+
+## 9. Deploy
+
+### Zielverzeichnis
+
+`C:\Data\fdash-dashboard\` (neben `C:\Data\Factorio\`)
+
+### Vorgehen
+
+```batch
+:: 1. Frontend bauen
+cd web
+npm run build
+
+:: 2. API + Frontend veröffentlichen (self-contained single-file)
+dotnet publish src\Fdash.Api\Fdash.Api.csproj -c Release -r win-x64 ^
+  --self-contained true /p:PublishSingleFile=true ^
+  /p:PublishSqlitePCLRawBundle=true /p:IncludeNativeLibrariesForSelfExtract=true ^
+  -o "C:\Data\fdash-dashboard"
+
+:: 3. Starten (oder fdash-start.bat nutzen)
+C:\Data\fdash-dashboard\Fdash.Api.exe
+```
+
+### Was darf NICHT überschrieben werden
+
+- `C:\Data\fdash-dashboard\appsettings.Local.json` – enthält RCON-Passwort & lokale Pfade
+- `C:\Data\fdash-dashboard\fdash.db` – enthält Zeitreihen & Supply Chains
+
+Beide werden vom Publish nicht angetastet (Json nur bei `PreserveNewest`, db gar nicht).
+
+### Nur-Frontend-Deploy (Backend unverändert)
+
+```batch
+xcopy /e /y src\Fdash.Api\wwwroot C:\Data\fdash-dashboard\wwwroot\
+:: dann Prozess neustarten
+```
+
+### Testen nach Deploy
+
+```powershell
+Invoke-RestMethod http://localhost:5000/api/health
+Invoke-RestMethod http://localhost:5000/api/supply-chain
+Invoke-RestMethod "http://localhost:5000/api/supply-chain/recipes/iron-plate?surface=nauvis"
+Invoke-RestMethod "http://localhost:5000/api/supply-chain/train-availability?surface=nauvis"
+```
