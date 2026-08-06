@@ -113,6 +113,9 @@ jobs:
             if printf '%s' "$init_json" | grep -q UnknownMod; then
               echo "::error::The mod page does not exist on the portal yet. Create it once via the web UI (https://mods.factorio.com -> Upload, pick ${MOD_ZIP}), then re-run this workflow."
             fi
+            if printf '%s' "$init_json" | grep -q InvalidApiKey; then
+              echo "::error::MODPORTAL_TOKEN is not a valid mod portal upload key. Create one at https://factorio.com/profile (API Keys) with the 'ModPortal: Upload Mods' scope, then update the repository secret."
+            fi
             exit 1
           fi
           resp=$(curl -sS -X POST "$upload_url" -F "file=@${MOD_ZIP}")
