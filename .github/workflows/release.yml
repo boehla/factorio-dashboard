@@ -98,16 +98,31 @@ jobs:
           MOD_ZIP: mod/dist/fdash-exporter_${{ steps.check.outputs.version }}.zip
         run: |
           set -euo pipefail
+          mod="fdash-exporter"
+          version="${{ steps.check.outputs.version }}"
           if [ -z "${MODPORTAL_TOKEN:-}" ]; then
             echo "::warning::MODPORTAL_TOKEN secret is not set — skipping the mod portal upload."
             exit 0
           fi
           echo "mod portal token: present (${#MODPORTAL_TOKEN} chars)"
-          mod="fdash-exporter"
+          # Schon veröffentlicht? Dann ist der Re-Run ein No-Op. Die Portal-API
+          # lehnt doppelte Versionen zwar ab, liefert aber keinen verlässlichen
+          # Fehlertext — die öffentliche Mod-API ist der robuste Check.
+          if curl -sS "https://mods.factorio.com/api/mods/${mod}" | node -e '
+            let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+              try { const j = JSON.parse(s); process.exit((j.releases || []).some(r => r.version === process.argv[1]) ? 0 : 1); }
+              catch { process.exit(1); }
+            });' "$version"; then
+            echo "::warning::${version} is already on the mod portal — nothing to upload."
+            exit 0
+          fi
           init_json=$(curl -sS -X POST "https://mods.factorio.com/api/v2/mods/releases/init_upload" \
             -H "Authorization: Bearer ${MODPORTAL_TOKEN}" \
-            -F "mod=${mod}")
-          upload_url=$(node -e 'const j=JSON.parse(process.argv[1]); console.log(j.upload_url ?? "")' "$init_json")
+            -F "mod=${mod}" || true)
+          upload_url=$(printf '%s' "$init_json" | node -e '
+            let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
+              try { const j = JSON.parse(s); console.log(j.upload_url || ""); } catch { console.log(""); }
+            });' || true)
           if [ -z "$upload_url" ]; then
             echo "::error::init_upload failed: ${init_json}"
             if printf '%s' "$init_json" | grep -q UnknownMod; then
@@ -115,10 +130,6 @@ jobs:
             fi
             if printf '%s' "$init_json" | grep -q InvalidApiKey; then
               echo "::error::MODPORTAL_TOKEN is not a valid mod portal upload key. Create one at https://factorio.com/profile (API Keys) with the 'ModPortal: Upload Mods' scope, then update the repository secret."
-            fi
-            if printf '%s' "$init_json" | grep -qiE 'VersionAlreadyExists|already exists'; then
-              echo "::warning::${{ steps.check.outputs.version }} is already on the mod portal — nothing to upload."
-              exit 0
             fi
             exit 1
           fi
