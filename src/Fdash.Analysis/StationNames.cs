@@ -8,10 +8,10 @@ public sealed record StationLabel {
     /// <summary>"item" | "fluid" | "recipe" | "virtual-signal" | ... — aus dem Rich-Text-Tag.</summary>
     public string Type { get; init; } = "item";
 
-    /// <summary>Liefernde Station: der Name traegt [virtual-signal=signal-output].</summary>
+    /// <summary>Liefernde Station: der Name traegt [virtual-signal=signal-input].</summary>
     public bool Provides { get; init; }
 
-    /// <summary>Abnehmende Station: [virtual-signal=signal-input].</summary>
+    /// <summary>Abnehmende Station: [virtual-signal=signal-output].</summary>
     public bool Requests { get; init; }
 
     /// <summary>Weder Liefer- noch Abnehmestation — Depot, Reparaturposten, Fahrplanpunkt.</summary>
@@ -24,16 +24,19 @@ public sealed record StationLabel {
 /// Der Mod kann das nicht liefern: Factorio kennt kein "diese Station liefert
 /// Eisen". Was ein Zugnetz fuehrt, steht ausschliesslich in den Namen — und weil
 /// die Namen von einem Blueprint-Schema kommen, sind sie maschinenlesbar:
-/// <c>[item=iron-plate][virtual-signal=signal-output]</c> liefert,
-/// <c>[fluid=steam][virtual-signal=signal-input]</c> nimmt ab.
+/// <c>[item=iron-plate][virtual-signal=signal-input]</c> liefert,
+/// <c>[fluid=steam][virtual-signal=signal-output]</c> nimmt ab.
 ///
 /// Alles ausser den beiden Rollensignalen ist Beiwerk: <c>[item=ash]O</c>
 /// unterscheidet zwei Aschesorten, <c>[fluid=steam]150°C</c> die Temperatur.
 /// Fuer die Frage "fuehrt das Netz Dampf?" zaehlt nur das erste echte Tag.
 /// </summary>
 public static class StationNames {
-    private const string outputSignal = "signal-output";
-    private const string inputSignal = "signal-input";
+    // Namenskonvention des Savs: [virtual-signal=signal-input] speist die Ware
+    // ins Zugnetz ein (Lieferant/Provider), [virtual-signal=signal-output]
+    // entnimmt sie (Abnehmer).
+    private const string providerSignal = "signal-input";
+    private const string requesterSignal = "signal-output";
 
     /// <summary>Tags, die nie das gehandelte Gut bezeichnen, sondern nur Darstellung.</summary>
     private static readonly HashSet<string> decorative = new HashSet<string>(StringComparer.Ordinal) {
@@ -64,8 +67,8 @@ public static class StationNames {
             if(comma >= 0) tagName = tagName.Substring(0, comma);
             if(tagType.Length == 0 || tagName.Length == 0) continue;
 
-            if(tagType == "virtual-signal" && tagName == outputSignal) { provides = true; continue; }
-            if(tagType == "virtual-signal" && tagName == inputSignal) { requests = true; continue; }
+            if(tagType == "virtual-signal" && tagName == providerSignal) { provides = true; continue; }
+            if(tagType == "virtual-signal" && tagName == requesterSignal) { requests = true; continue; }
 
             // Das erste nicht-dekorative Tag ist das Gut. Auch ein virtuelles
             // Signal zaehlt: [virtual-signal=signal-fire] ist in diesem Netz eine

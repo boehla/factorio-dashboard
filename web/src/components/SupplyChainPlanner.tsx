@@ -24,8 +24,10 @@ function parseStations(payload: any): TrainAvailability {
       let tagName = m[2];
       const comma = tagName.indexOf(",");
       if (comma >= 0) tagName = tagName.slice(0, comma);
-      if (tagType === "virtual-signal" && tagName === "signal-output") { providesRole = true; continue; }
-      if (tagType === "virtual-signal" && tagName === "signal-input") { requestsRole = true; continue; }
+      // Namenskonvention: signal-input = Einspeisung ins Netz (Provider),
+      // signal-output = Entnahme aus dem Netz (Request).
+      if (tagType === "virtual-signal" && tagName === "signal-input") { providesRole = true; continue; }
+      if (tagType === "virtual-signal" && tagName === "signal-output") { requestsRole = true; continue; }
       if (item === null && !decorative.has(tagType)) { item = tagName; type = tagType; }
     }
     if (!item || (!providesRole && !requestsRole)) continue;

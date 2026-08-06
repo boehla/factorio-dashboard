@@ -118,7 +118,7 @@ public static class TrainTools {
 
     [McpServerTool(Name = "get_train_network_items")]
     [Description("Welche Waren das Zugnetz fuehrt: deduplizierte Liste aus den Stationsnamen, getrennt "
-        + "nach Lieferstation ([virtual-signal=signal-output]) und Abnehmer (signal-input), mit Zahl der "
+        + "nach Lieferstation ([virtual-signal=signal-input]) und Abnehmer (signal-output), mit Zahl der "
         + "Stops je Ware. Mit items= wird daraus die direkte Antwort auf \"hat das Netz X?\" — gefunden "
         + "gegen fehlend, ohne die ganze Liste zu lesen.")]
     public static string GetTrainNetworkItems(

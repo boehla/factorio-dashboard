@@ -282,7 +282,7 @@ useEffect(() => {
 ### 5.2 Train-Netzwerk-Erkennung
 
 - Die Mod liefert in `stations` bereits gruppierte Station-Namen
-- `StationNames.cs` parst Rich-Text-Markup `[item=...]` / `[fluid=...]` / `[virtual-signal=signal-output]`
+- `StationNames.cs` parst Rich-Text-Markup `[item=...]` / `[fluid=...]` / `[virtual-signal=signal-input]` (Provider) / `signal-output` (Request)
 - Diese Logik wird 1:1 für den C#-Cache und als TypeScript-Port fürs Frontend-Live-Update benötigt
 
 ### 5.3 Forschung / Verfügbarkeit

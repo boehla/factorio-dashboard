@@ -566,21 +566,21 @@ Check("tech ledger: another save does not inherit it", ledger.Researched("save-b
 // --------------------------------------------------------------------------
 // 16) Stationsnamen als Warenliste. Factorio kennt kein "diese Station liefert
 //     Eisen" — die Information steht nur im Namen, und die Namen kommen aus
-//     einem Blueprint-Schema: [item=x][virtual-signal=signal-output] liefert.
+//     einem Blueprint-Schema: [item=x][virtual-signal=signal-input] liefert.
 //     Die Faelle, an denen eine naive Lesart scheitert, stehen alle im echten
 //     Save: Beitext hinter dem Tag, ein virtuelles Signal als Ware und
 //     Stationen ganz ohne Rolle.
 // --------------------------------------------------------------------------
-Check("station name: output signal marks a provider",
-    StationNames.Parse("[item=iron-plate][virtual-signal=signal-output]") is { Item: "iron-plate", Type: "item", Provides: true, Requests: false });
-Check("station name: input signal marks a consumer",
-    StationNames.Parse("[item=iron-ore][virtual-signal=signal-input]") is { Item: "iron-ore", Requests: true, Provides: false });
+Check("station name: input signal marks a provider",
+    StationNames.Parse("[item=iron-plate][virtual-signal=signal-input]") is { Item: "iron-plate", Type: "item", Provides: true, Requests: false });
+Check("station name: output signal marks a consumer",
+    StationNames.Parse("[item=iron-ore][virtual-signal=signal-output]") is { Item: "iron-ore", Requests: true, Provides: false });
 Check("station name: text after the tag does not hide the fluid",
-    StationNames.Parse("[fluid=steam]150°C[virtual-signal=signal-output]") is { Item: "steam", Type: "fluid", Provides: true });
+    StationNames.Parse("[fluid=steam]150°C[virtual-signal=signal-input]") is { Item: "steam", Type: "fluid", Provides: true });
 Check("station name: a virtual signal can be the ware itself",
-    StationNames.Parse("[virtual-signal=signal-fire][virtual-signal=signal-output]") is { Item: "signal-fire", Type: "virtual-signal", Provides: true });
+    StationNames.Parse("[virtual-signal=signal-fire][virtual-signal=signal-input]") is { Item: "signal-fire", Type: "virtual-signal", Provides: true });
 Check("station name: quality rides on the item tag",
-    StationNames.Parse("[item=iron-plate,quality=rare][virtual-signal=signal-output]").Item == "iron-plate");
+    StationNames.Parse("[item=iron-plate,quality=rare][virtual-signal=signal-input]").Item == "iron-plate");
 Check("station name: a depot has no role",
     !StationNames.Parse("New[item=cargo-wagon]").HasRole);
 Check("station name: a plain name yields nothing",
@@ -590,12 +590,12 @@ object Stop(int stops) => new { stops, trains = 0 };
 await bus.PublishAsync(new Snapshot("stations@nauvis", "testsave", now, FdashJson.ToElement(new {
     surface = "nauvis",
     stations = new Dictionary<string, object> {
-        ["[item=iron-plate][virtual-signal=signal-output]"] = Stop(6),
-        ["[item=iron-plate][virtual-signal=signal-input]"] = Stop(3),
-        ["[fluid=steam][virtual-signal=signal-output]"] = Stop(2),
-        ["[item=ash][virtual-signal=signal-output]"] = Stop(1),
-        ["[item=ash]O[virtual-signal=signal-output]"] = Stop(2),
-        ["[item=iron-ore][virtual-signal=signal-input]"] = Stop(4),
+        ["[item=iron-plate][virtual-signal=signal-input]"] = Stop(6),
+        ["[item=iron-plate][virtual-signal=signal-output]"] = Stop(3),
+        ["[fluid=steam][virtual-signal=signal-input]"] = Stop(2),
+        ["[item=ash][virtual-signal=signal-input]"] = Stop(1),
+        ["[item=ash]O[virtual-signal=signal-input]"] = Stop(2),
+        ["[item=iron-ore][virtual-signal=signal-output]"] = Stop(4),
         ["New[item=cargo-wagon]"] = Stop(12)
     } })));
 
@@ -607,8 +607,8 @@ Check("network items: stations without a role are counted, not listed",
 Check("network items: fluids are marked as such", netProvide.Contains("\"type\":\"fluid\""));
 Check("network items: two names for one ware collapse into one entry",
     netProvide.Contains("\"name\":\"ash\",\"stops\":3,\"station_names\":2"));
-// Eisen hat je eine Liefer- und eine Abnahmestation — das sind nicht zwei
-// Lieferstationen.
+// Eisen hat je eine Liefer- (signal-input) und eine Abnahmestation
+// (signal-output) — das sind nicht zwei Lieferstationen.
 Check("network items: the name count stays inside the asked role",
     netProvide.Contains("\"name\":\"iron-plate\",\"stops\":6}"));
 
