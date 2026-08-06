@@ -1,4 +1,11 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.2.2
+Date: 2026-08-06
+  Changes:
+    - No mod changes in this release: 0.2.2 verifies the automated publishing pipeline
+      (GitHub release + mod portal upload on a version tag). Future versions are released
+      automatically by pushing a tag.
+---------------------------------------------------------------------------------------------------
 Version: 0.2.1
 Date: 2026-08-02
   Changes:
