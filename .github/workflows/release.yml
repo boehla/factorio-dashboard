@@ -87,6 +87,33 @@ jobs:
           }
           Write-Host "zip layout OK ($($names.Count) entries)"
 
+      # Offizieller Mod-Portal-Upload (mods.factorio.com), damit der Mod
+      # ingame installierbar ist. Die API legt KEINE neue Mod-Seite an — die
+      # muss einmalig per Web-UI existieren (mods.factorio.com -> Upload).
+      # Danach laeuft jeder neue Release automatisch hier durch.
+      - name: Publish to mod portal
+        if: ${{ secrets.MODPORTAL_TOKEN != '' }}
+        shell: bash
+        env:
+          MODPORTAL_TOKEN: ${{ secrets.MODPORTAL_TOKEN }}
+          MOD_ZIP: mod/dist/fdash-exporter_${{ steps.check.outputs.version }}.zip
+        run: |
+          set -euo pipefail
+          mod="fdash-exporter"
+          init_json=$(curl -sS -X POST "https://mods.factorio.com/api/v2/mods/releases/init_upload" \
+            -H "Authorization: Bearer ${MODPORTAL_TOKEN}" \
+            -F "mod=${mod}")
+          upload_url=$(node -e 'const j=JSON.parse(process.argv[1]); console.log(j.upload_url ?? "")' "$init_json")
+          if [ -z "$upload_url" ]; then
+            echo "::error::init_upload failed: ${init_json}"
+            if printf '%s' "$init_json" | grep -q UnknownMod; then
+              echo "::error::The mod page does not exist on the portal yet. Create it once via the web UI (https://mods.factorio.com -> Upload, pick ${MOD_ZIP}), then re-run this workflow."
+            fi
+            exit 1
+          fi
+          resp=$(curl -sS -X POST "$upload_url" -F "file=@${MOD_ZIP}")
+          node -e 'const j=JSON.parse(process.argv[1]); if (j.success !== true) { console.error("portal upload failed: " + process.argv[1]); process.exit(1); } console.log("mod portal upload OK")' "$resp"
+
       - uses: actions/upload-artifact@v4
         with:
           name: mod
@@ -207,9 +234,13 @@ jobs:
             0.*) prerelease="--prerelease" ;;
             *)   prerelease="" ;;
           esac
-          gh release create "$tag" \
-            --title "v$version" \
-            --notes-file notes.md \
-            $prerelease \
-            artifacts/mod/*.zip \
-            artifacts/dashboard/*.zip
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag exists already — skipping creation (assets unchanged)."
+          else
+            gh release create "$tag" \
+              --title "v$version" \
+              --notes-file notes.md \
+              $prerelease \
+              artifacts/mod/*.zip \
+              artifacts/dashboard/*.zip
+          fi
