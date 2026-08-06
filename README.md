@@ -11,6 +11,26 @@ src/                  The web server (C#). Reads snapshots, stores time series, 
 web/                  The frontend (React + TS + Vite + Tailwind + uPlot).
 ```
 
+## Screenshots
+
+Overview — power, research, alerts and robots at a glance:
+
+![Overview](docs/screenshots/overview.png)
+
+Supply chain planner with per-ingredient train availability (provider stations marked green):
+
+![Supply Chain Planner](docs/screenshots/planner.png)
+
+Machine status grouped by bottleneck, ore patches with remaining lifetime, and the train network:
+
+| Machines | Resources | Trains |
+|---|---|---|
+| ![Machines](docs/screenshots/machines.png) | ![Resources](docs/screenshots/resources.png) | ![Trains](docs/screenshots/trains.png) |
+
+Research queue and science-pack throughput:
+
+![Research](docs/screenshots/research.png)
+
 ## Why a mod instead of RCON
 
 The first version pulled everything over RCON `/silent-command`. That works — but every poll
