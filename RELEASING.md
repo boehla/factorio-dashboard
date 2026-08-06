@@ -4,7 +4,7 @@
 
 | | |
 | --- | --- |
-| Mod name `fdash-exporter` on the portal | available (as of 2026-07-30) |
+| Mod `fdash-exporter` on the portal | published (0.2.1 + 0.2.2, 2026-08-06) |
 | Thumbnail, changelog, locale, LICENSE | present |
 | CI (`.github/workflows/ci.yml`) | builds backend + frontend, runs self-tests and Lua checks |
 | Backend compiles | verified by CI and locally (0 warnings, 28/28 self-tests) |
@@ -142,20 +142,43 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-That builds the mod zip and a self-contained Windows dashboard, then creates the release with
-both attached. Release notes come from the changelog block for that version, so the portal
-changelog and the GitHub release cannot drift apart.
+That builds the mod zip and a self-contained Windows dashboard, uploads the mod to the
+mod portal, then creates the GitHub release with both zips attached. Release notes come from
+the changelog block for that version, so the portal changelog and the GitHub release cannot
+drift apart.
 
 The workflow refuses to run if the tag disagrees with `version` in `info.json`, if any
 `SET-ME` placeholder is left, if the packaged zip has the wrong layout, or if the published
 `appsettings.json` somehow carries an RCON password. Versions starting with `0.` are marked
 as pre-release.
 
+Re-running the workflow for an already released tag is safe: the GitHub release is only
+created if it does not exist yet, and the portal upload is skipped once the version is already
+published (checked against the public mod portal API, `mods.factorio.com/api/mods/…`).
+
 To undo a release: delete it on GitHub, then `git push --delete origin v0.1.0`.
 
 ## Portal upload
 
-<https://mods.factorio.com/upload>. For the description, the content of
+Uploads are automated: every tag push publishes the mod to
+<https://mods.factorio.com/mod/fdash-exporter> as part of `release.yml`. One-time setup:
+
+1. **Create the mod page once** via the web UI — <https://mods.factorio.com/upload>, pick a
+   release zip. The portal API has no create-mod endpoint; `init_upload` fails with
+   `UnknownMod` until the page exists.
+2. **API key**: create one at <https://factorio.com/profile> → **API Keys** with the
+   **ModPortal: Upload Mods** scope (optionally also ModPortal: Edit Mods if you want to set
+   description/tags/license via `edit_details`).
+3. **Secret**: store it as a repository secret `MODPORTAL_TOKEN` (Settings → Secrets and
+   variables → Actions → Repository secrets). An *environment* secret is not seen by the
+   workflow. If the token is missing the step skips with a warning; if it is invalid the step
+   fails with a hint (`InvalidApiKey` usually means the key lacks the Upload Mods scope).
+
+Mechanics: the workflow calls `init_upload` (Bearer token, `mod` field), then uploads the zip
+to the returned `upload_url`. The step is a no-op when the version is already on the portal,
+so re-runs stay green. `UnknownMod` reminds you to create the page first.
+
+For the description: the content of
 `mod/fdash-exporter/README.md` mostly fits — but portal markdown cannot render tables, so
 rewrite those as lists first.
 
