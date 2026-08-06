@@ -102,6 +102,7 @@ jobs:
             echo "::warning::MODPORTAL_TOKEN secret is not set — skipping the mod portal upload."
             exit 0
           fi
+          echo "mod portal token: present (${#MODPORTAL_TOKEN} chars)"
           mod="fdash-exporter"
           init_json=$(curl -sS -X POST "https://mods.factorio.com/api/v2/mods/releases/init_upload" \
             -H "Authorization: Bearer ${MODPORTAL_TOKEN}" \
