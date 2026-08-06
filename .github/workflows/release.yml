@@ -92,13 +92,16 @@ jobs:
       # muss einmalig per Web-UI existieren (mods.factorio.com -> Upload).
       # Danach laeuft jeder neue Release automatisch hier durch.
       - name: Publish to mod portal
-        if: ${{ secrets.MODPORTAL_TOKEN != '' }}
         shell: bash
         env:
           MODPORTAL_TOKEN: ${{ secrets.MODPORTAL_TOKEN }}
           MOD_ZIP: mod/dist/fdash-exporter_${{ steps.check.outputs.version }}.zip
         run: |
           set -euo pipefail
+          if [ -z "${MODPORTAL_TOKEN:-}" ]; then
+            echo "::warning::MODPORTAL_TOKEN secret is not set — skipping the mod portal upload."
+            exit 0
+          fi
           mod="fdash-exporter"
           init_json=$(curl -sS -X POST "https://mods.factorio.com/api/v2/mods/releases/init_upload" \
             -H "Authorization: Bearer ${MODPORTAL_TOKEN}" \
