@@ -116,6 +116,10 @@ jobs:
             if printf '%s' "$init_json" | grep -q InvalidApiKey; then
               echo "::error::MODPORTAL_TOKEN is not a valid mod portal upload key. Create one at https://factorio.com/profile (API Keys) with the 'ModPortal: Upload Mods' scope, then update the repository secret."
             fi
+            if printf '%s' "$init_json" | grep -qiE 'VersionAlreadyExists|already exists'; then
+              echo "::warning::${{ steps.check.outputs.version }} is already on the mod portal — nothing to upload."
+              exit 0
+            fi
             exit 1
           fi
           resp=$(curl -sS -X POST "$upload_url" -F "file=@${MOD_ZIP}")
