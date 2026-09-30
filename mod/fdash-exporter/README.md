@@ -123,7 +123,8 @@ Two things are worth knowing before you install this on a server.
 
 **Files are written on the server only.** The snapshot goes out through
 `helpers.write_file(…, for_player = 0)`, and `0` means "only the server's output". Clients
-never write anything into their own `script-output`.
+never write anything into their own `script-output`. (In singleplayer there is no server, so
+the mod writes without `for_player` there.)
 
 **The collectors run on every client anyway.** Factorio simulates in lockstep: control-stage
 code executes on every peer, and the results live in `storage`, which has to stay identical

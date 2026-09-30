@@ -46,7 +46,7 @@ local function block_body(tbl)
 end
 
 local function append(text)
-  helpers.write_file(FILE, text, true, 0)
+  publish.write(FILE, text, true)
 end
 
 -- Phasen in fester Reihenfolge. `source` liefert die sortierte Namensliste,
@@ -191,7 +191,7 @@ function protoexport.step(budget)
 
   -- Start: Datei anlegen und oeffnendes Objekt schreiben
   if s.phase == 0 then
-    helpers.write_file(FILE, "{", false, 0)
+    publish.write(FILE, "{", false)
     s.phase = 1
     s.i = 0
     s.names = nil

@@ -96,6 +96,13 @@ end
 
 -- ---------------------------------------------------------- Dateiausgabe
 
+--- Schreibt nach script-output. Im Multiplayer nur auf dem Server
+--- (for_player = 0), damit Clients nichts schreiben. Im Singleplayer gibt es
+--- keinen Server — 0 wuerde dort gar nichts schreiben, also ohne for_player.
+function publish.write(path, text, append)
+  helpers.write_file(path, text, append, game.is_multiplayer() and 0 or nil)
+end
+
 --- Schreibt Snapshot + Index, wenn das Intervall abgelaufen ist.
 function publish.write_if_due()
   if not config.file_output() then return end
@@ -111,13 +118,13 @@ function publish.write_if_due()
   storage.write_slot = slot + 1
   local name = "snapshot-" .. slot .. ".json"
 
-  helpers.write_file(DIR .. name, publish.snapshot_json(), false, 0)
-  helpers.write_file(DIR .. "index.json", table.concat({
+  publish.write(DIR .. name, publish.snapshot_json(), false)
+  publish.write(DIR .. "index.json", table.concat({
     '{"protocol":', PROTOCOL,
     ',"seq":', storage.pubseq,
     ',"tick":', tick,
     ',"file":', jstr(name), '}'
-  }), false, 0)
+  }), false)
 
   storage.written_seq = storage.pubseq
 end

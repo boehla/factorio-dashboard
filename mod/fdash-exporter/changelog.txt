@@ -1,4 +1,13 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.2.3
+Date: 2026-09-30
+  Bugfixes:
+    - Singleplayer: no files were written to script-output/fdash. The exporter wrote with
+      for_player = 0 ("server output only"), and a singleplayer game has no server, so the
+      write went nowhere. It now writes without for_player in singleplayer and keeps
+      for_player = 0 in multiplayer, where only the server writes. Thanks to ea1a87 for the
+      report.
+---------------------------------------------------------------------------------------------------
 Version: 0.2.2
 Date: 2026-08-06
   Changes:
