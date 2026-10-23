@@ -76,7 +76,9 @@ local PHASES = {
       local okp, prod_allowed = pcall(function() return proto.allow_productivity end)
       return {
         order = proto.order,
-        category = proto.category,
+        -- 2.1: ein Rezept hat eine Liste von Kategorien statt einer; das
+        -- Dashboard erwartet einen String, die erste ist die Hauptkategorie.
+        category = proto.categories and proto.categories[1] or nil,
         e = (ok and type(energy) == "number" and energy > 0) and energy or 0.5,
         prodmod = (okp and prod_allowed) and true or nil,
         ing = io_list(proto.ingredients),

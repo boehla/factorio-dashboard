@@ -30,14 +30,13 @@ function job.run(st, si, budget)
 
   local spent, done = sweep.registry(st, si, TYPES, budget, function(e)
     st.tanks = st.tanks + 1
-    local fb = e.fluidbox
-    if not fb then return end
-    for i = 1, #fb do
-      local f = fb[i]
+    -- 2.1 hat LuaFluidBox abgeschafft; die Fluidspeicher haengen direkt an der Entity.
+    for i = 1, e.fluids_count do
+      local f = e.get_fluid(i)
       -- Ein leerer Tank hat eine Fluidbox ohne Inhalt. Der zaehlt trotzdem
       -- mit: "20 Tanks, davon 19 leer" ist die Aussage, nicht "1 Tank".
       local cap = 0
-      local okc, c = pcall(function() return fb.get_capacity(i) end)
+      local okc, c = pcall(function() return e.get_fluid_capacity(i) end)
       if okc and type(c) == "number" then cap = c end
 
       if f and f.name then

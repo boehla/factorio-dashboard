@@ -8,8 +8,8 @@
 | Thumbnail, changelog, locale, LICENSE | present |
 | CI (`.github/workflows/ci.yml`) | builds backend + frontend, runs self-tests and Lua checks |
 | Backend compiles | verified by CI and locally (0 warnings, 28/28 self-tests) |
-| Mod loaded in Factorio | verified 2026-07-31 on 2.0.77 + Pyanodons (see below) |
-| Mod to dashboard end to end | verified 2026-07-31, live data in the browser |
+| Mod loaded in Factorio | verified 2026-07-31 on 2.0.77 + Pyanodons (see below); 0.3.0 verified 2026-10-23 on 2.1.23 + Pyanodons 3.1 |
+| Mod to dashboard end to end | verified 2026-07-31, live data in the browser; again 2026-10-23 on 2.1.23 via the MCP tools |
 
 ### What the in-game test covered
 

@@ -18,16 +18,19 @@ local GEN = { "generator" }
 local ACC = { "accumulator" }
 local POLE = { "electric-pole" }
 
--- max_power_output ist eine Prototyp-Eigenschaft und damit fuer die Session
--- konstant -> einmal pro Prototyp-Name aufloesen statt pro Entity.
+-- Die Nennleistung haengt nur an Prototyp und Qualitaet und ist damit fuer die
+-- Session konstant -> einmal pro Prototyp+Qualitaet aufloesen statt pro Entity.
+-- 2.1 hat das Attribut max_power_output durch get_max_power_output(quality) ersetzt.
 local max_output_cache = nil
-local function max_output(proto_name, proto)
+local function max_output(g)
   if not max_output_cache then max_output_cache = {} end
-  local v = max_output_cache[proto_name]
+  local quality = g.quality and g.quality.name or "normal"
+  local key = g.name .. "/" .. quality
+  local v = max_output_cache[key]
   if v ~= nil then return v end
-  local ok, mx = pcall(function() return proto.max_power_output end)
+  local ok, mx = pcall(function() return g.prototype.get_max_power_output(quality) end)
   v = (ok and type(mx) == "number") and mx or 0
-  max_output_cache[proto_name] = v
+  max_output_cache[key] = v
   return v
 end
 
@@ -52,9 +55,9 @@ function job.run(st, si, budget)
     spent, done = sweep.registry(st, si, GEN, budget, function(g)
       local gid = g.electric_network_id
       if not gid then return end
-      -- max_power_output ist J/Tick -> x60 = Watt. Solar und Akkus zaehlen hier
+      -- get_max_power_output liefert J/Tick -> x60 = Watt. Solar und Akkus zaehlen hier
       -- bewusst NICHT mit; es geht um steuerbare Nennleistung.
-      local mx = max_output(g.name, g.prototype)
+      local mx = max_output(g)
       if mx > 0 then cap[gid] = (cap[gid] or 0) + mx * 60 end
     end)
     if done then st.phase, st.ti, st.slot = 2, 1, 1 end

@@ -159,7 +159,7 @@ roughly `entities / budget` ticks.
 
 ## Compatibility
 
-- Factorio 2.0. Space Age is optional — platform collectors disable themselves without it.
+- Factorio 2.1 (use 0.2.3 for Factorio 2.0). Space Age is optional — platform collectors disable themselves without it.
 - No prototype changes, no GUI, no entities. Safe to add to and remove from an existing save.
 - Reads the `player` force only.
 

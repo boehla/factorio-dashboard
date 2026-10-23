@@ -16,8 +16,8 @@ local job = { name = "assemblers", per_surface = true, interval = 300 }
 --- Ausgangsfluide drin, die filtert der Abgleich mit den Rezept-Zutaten weg).
 local function have_of(e)
   local have = {}
-  -- Index 2 ist bei Assembler, Ofen und Silo derselbe Input-Slotsatz.
-  local inv = e.get_inventory(defines.inventory.assembling_machine_input)
+  -- crafter_input ist bei Assembler, Ofen und Silo derselbe Input-Slotsatz.
+  local inv = e.get_inventory(defines.inventory.crafter_input)
   if inv then
     for k, v in pairs(inv.get_contents()) do
       -- 2.0 liefert eine Liste {name=,count=,quality=}, aeltere ein name->count-Dict
@@ -25,12 +25,10 @@ local function have_of(e)
       else have[k] = (have[k] or 0) + v end
     end
   end
-  local fb = e.fluidbox
-  if fb then
-    for i = 1, #fb do
-      local f = fb[i]
-      if f and f.name then have[f.name] = (have[f.name] or 0) + f.amount end
-    end
+  -- 2.1 hat LuaFluidBox abgeschafft; die Fluidspeicher haengen direkt an der Entity.
+  for i = 1, e.fluids_count do
+    local f = e.get_fluid(i)
+    if f and f.name then have[f.name] = (have[f.name] or 0) + f.amount end
   end
   return have
 end

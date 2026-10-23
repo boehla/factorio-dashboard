@@ -129,8 +129,8 @@ public sealed class CollectorService : BackgroundService {
         string saveId = current.SaveId;
         string primary = primarySurface(current);
 
-        // --- 2. Prototypen (einmalig, sobald der Mod sie geschrieben hat) ---
-        if(!prototypes.Loaded) await prototypes.TryLoadAsync(ct);
+        // --- 2. Prototypen (sobald der Mod sie geschrieben hat, und neu nach jeder Aenderung) ---
+        await prototypes.TryLoadAsync(ct);
 
         // --- 3. Jobs verteilen ---
         foreach(KeyValuePair<string, ModJob> kv in snapshot.Jobs) {

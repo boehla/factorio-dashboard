@@ -1,4 +1,14 @@
 ---------------------------------------------------------------------------------------------------
+Version: 0.3.0
+Date: 2026-10-23
+  Changes:
+    - Updated to Factorio 2.1. This version requires 2.1; stay on 0.2.3 for Factorio 2.0.
+    - Fluid contents and tank capacities are read through the new per-entity fluid API
+      (LuaEntity.get_fluid / get_fluid_capacity), since 2.1 removed LuaFluidBox.
+    - Generator nameplate power uses get_max_power_output and now accounts for quality.
+    - The recipe export takes the first of the recipe's categories, since 2.1 recipes
+      have a list of categories instead of a single one.
+---------------------------------------------------------------------------------------------------
 Version: 0.2.3
 Date: 2026-09-30
   Bugfixes:

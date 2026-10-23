@@ -9,9 +9,11 @@ namespace Fdash.Collector;
 /// Laedt den Prototyp-Export des Mods (<c>script-output/fdash/prototypes.json</c>).
 ///
 /// Der Mod schreibt die Datei beim ersten Start und nach jeder Mod-Aenderung,
-/// gestueckelt ueber mehrere Ticks. Sie ist pro Save konstant, wird also genau
-/// einmal eingelesen — und liefert Rezeptstruktur, Ressourcen-Metadaten und
-/// Fluidnamen fuer den Abhaengigkeitsgraphen.
+/// gestueckelt ueber mehrere Ticks. Eingelesen wird sie beim ersten Auftauchen
+/// und erneut, sobald sich ihr Schreibzeitpunkt aendert (Mod- oder Spiel-Update,
+/// z.B. 2.0 -> 2.1, laufen sonst bis zum Neustart mit veralteten Rezepten). Sie
+/// liefert Rezeptstruktur, Ressourcen-Metadaten und Fluidnamen fuer den
+/// Abhaengigkeitsgraphen.
 /// </summary>
 public sealed class PrototypeExporter {
     private readonly CollectorOptions options;
@@ -21,6 +23,9 @@ public sealed class PrototypeExporter {
 
     /// <summary>Einmal kaputt gelesen — nicht bei jedem Poll erneut versuchen.</summary>
     private bool failed;
+
+    /// <summary>Schreibzeitpunkt der Datei beim letzten Lese- oder Fehlversuch.</summary>
+    private DateTime fileStamp;
 
     public IReadOnlyDictionary<string, ResourceProto> Resources { get; private set; }
         = new Dictionary<string, ResourceProto>();
@@ -54,17 +59,24 @@ public sealed class PrototypeExporter {
 
     /// <summary>
     /// Versucht zu laden. Liefert false, solange die Datei fehlt oder noch
-    /// geschrieben wird — der Aufrufer probiert es dann spaeter erneut.
+    /// geschrieben wird — der Aufrufer probiert es dann spaeter erneut. Hat sich
+    /// die Datei seit dem letzten Laden geaendert, wird neu eingelesen; bis das
+    /// gelingt, bleiben die alten Daten stehen.
     /// </summary>
     public async Task<bool> TryLoadAsync(CancellationToken ct) {
-        if(Loaded) return true;
-        if(failed) return false;
         string? p = path;
         if(p == null) {
-            log.LogWarning("Collector:ScriptOutputPath is not set — prototype data (recipe graph, ore metadata) stays empty.");
-            return false;
+            if(!Loaded && !failed) {
+                failed = true;
+                log.LogWarning("Collector:ScriptOutputPath is not set — prototype data (recipe graph, ore metadata) stays empty.");
+            }
+            return Loaded;
         }
-        if(!File.Exists(p)) return false;
+        if(!File.Exists(p)) return Loaded;
+        DateTime stamp = File.GetLastWriteTimeUtc(p);
+        if(stamp == fileStamp && (Loaded || failed)) return Loaded;
+        // Neue Datei -> ein frueherer Lesefehler gilt nicht mehr.
+        failed = false;
 
         try {
             await using(FileStream fs = new FileStream(p, FileMode.Open, FileAccess.Read,
@@ -73,19 +85,22 @@ public sealed class PrototypeExporter {
                     load(doc.RootElement);
                 }
             }
+            if(Loaded) log.LogInformation("prototypes.json changed — reloaded ({Recipes} recipes).", Recipes.Count);
+            fileStamp = stamp;
             Loaded = true;
             return true;
         } catch(JsonException) {
             // Wird gerade geschrieben (der Mod haengt blockweise an) — spaeter erneut.
-            return false;
+            return Loaded;
         } catch(IOException) {
-            return false;
+            return Loaded;
         } catch(Exception ex) {
             // Alles andere ist ein Fehler in der Datei selbst, nicht ein
-            // Zeitproblem. Die Datei ist pro Save konstant: erneut zu versuchen
+            // Zeitproblem. Dieselbe Datei erneut zu lesen
             // liefert dasselbe Ergebnis und flutet nur das Log (und trieb den
             // Collector vorher in seinen Backoff, weil der Fehler bis dorthin
             // durchschlug).
+            fileStamp = stamp;
             if(!failed) {
                 failed = true;
                 log.LogError(ex, "prototypes.json could not be read — recipe graph and technologies "
