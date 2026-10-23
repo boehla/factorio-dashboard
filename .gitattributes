@@ -18,3 +18,10 @@
 *.jpg     binary
 *.zip     binary
 *.db      binary
+
+# Der Mod wird lokal (build-mod.ps1) und im Release-Job (windows-latest) gepackt.
+# Factorio vergleicht beim Verbinden Pruefsummen ueber die Script-Dateien. Ohne
+# festes eol haengt der Inhalt am autocrlf des jeweiligen Checkouts, und ein
+# lokaler Build passt nicht zum Portal-Zip: Clients koennen dann nicht joinen
+# ("mod script files are not identical"). Deshalb hier ueberall LF.
+mod/fdash-exporter/** text=auto eol=lf
