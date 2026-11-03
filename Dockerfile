@@ -5,14 +5,12 @@ COPY web/package*.json ./
 RUN npm ci
 COPY web/ ./
 RUN npm run build
-ARG DOTNET_SDK_VERSION
 # https://learn.microsoft.com/en-us/dotnet/core/docker/build-container
 FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION} AS backend
 WORKDIR /App
 COPY ./ ./
 RUN dotnet publish -o out
 # Build runtime image
-ARG DOTNET_SDK_VERSION
 FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION}
 WORKDIR /App
 #RUN apt update && apt install -y curl
