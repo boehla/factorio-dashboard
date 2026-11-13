@@ -9,7 +9,7 @@ RUN npm run build
 FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION} AS backend
 WORKDIR /App
 COPY ./ ./
-RUN dotnet publish -o out
+RUN dotnet publish src/Fdash.Api/Fdash.Api.csproj -c Release -o out
 # Build runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION}
 WORKDIR /App
