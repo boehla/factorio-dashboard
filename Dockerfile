@@ -1,5 +1,5 @@
 ARG DOTNET_VERSION="8.0"
-FROM node:lts-alpine AS ui
+FROM node:22-alpine AS ui
 WORKDIR /App
 COPY web/package*.json ./
 RUN npm ci
