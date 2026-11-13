@@ -13,7 +13,6 @@ RUN dotnet publish src/Fdash.Api/Fdash.Api.csproj -c Release -o out
 # Build runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION}
 WORKDIR /App
-#RUN apt update && apt install -y curl
 COPY --from=backend /App/out /App
 COPY --from=ui /src/Fdash.Api/wwwroot /App/wwwroot/
 COPY src/Fdash.Api/appsettings.Docker.json /App/appsettings.Local.json
