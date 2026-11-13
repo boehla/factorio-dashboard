@@ -15,6 +15,6 @@ FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION}
 WORKDIR /App
 COPY --from=backend /App/out /App
 COPY --from=ui /src/Fdash.Api/wwwroot /App/wwwroot/
-COPY src/Fdash.Api/appsettings.Docker.json /App/appsettings.Local.json
+ENV ASPNETCORE_ENVIRONMENT=Docker
 ENTRYPOINT ["dotnet", "Fdash.Api.dll"]
 #HEALTHCHECK --interval=5m --timeout=5s CMD curl -f http://localhost:5000/api/health || exit 1
