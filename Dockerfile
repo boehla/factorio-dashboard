@@ -1,0 +1,19 @@
+ARG DOTNET_VERSION="8.0"
+FROM node:22-alpine AS ui
+WORKDIR /App
+COPY web/package*.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+# https://learn.microsoft.com/en-us/dotnet/core/docker/build-container
+FROM mcr.microsoft.com/dotnet/sdk:${DOTNET_VERSION} AS backend
+WORKDIR /App
+COPY ./ ./
+RUN dotnet publish src/Fdash.Api/Fdash.Api.csproj -c Release -o out
+# Build runtime image
+FROM mcr.microsoft.com/dotnet/aspnet:${DOTNET_VERSION}
+WORKDIR /App
+COPY --from=backend /App/out /App
+COPY --from=ui /src/Fdash.Api/wwwroot /App/wwwroot/
+ENV ASPNETCORE_ENVIRONMENT=Docker
+ENTRYPOINT ["dotnet", "Fdash.Api.dll"]

@@ -4,6 +4,7 @@ appsettings.Local.json
 **/appsettings.Local.json
 *.env
 .env
+compose.override.yaml
 
 # ------------------------------------------------------------------- .NET
 bin/
